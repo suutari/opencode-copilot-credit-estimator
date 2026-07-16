@@ -27,7 +27,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from itertools import accumulate
 
-from textual import on
+from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -233,11 +233,18 @@ def summarize_by_model(rows: list[dict]) -> list[tuple[str, dict]]:
 # ---------------------------------------------------------------------------
 
 RANGES = [
-    ("hour",  "Last hour"),
-    ("today", "Today"),
-    ("week",  "This week"),
-    ("month", "This month"),
+    ("hour",  "Last hour",  "Hour"),
+    ("today", "Today",      "Today"),
+    ("week",  "This week",  "Week"),
+    ("month", "This month", "Month"),
 ]
+
+# Terminal size thresholds below which the app switches to compact mode.
+COMPACT_WIDTH = 80
+COMPACT_HEIGHT = 30
+
+# Below this width, the status bar drops the last-updated timestamp.
+STATUS_TIME_MIN_WIDTH = 50
 
 
 class CreditChart(PlotextPlot):
@@ -292,32 +299,104 @@ class CreditChart(PlotextPlot):
 
 
 class ModelTable(DataTable):
-    """Per-model breakdown table."""
+    """Per-model breakdown table.
 
-    COLUMNS = ("Model", "Reqs", "Input tok", "Output tok", "Cache R", "Cache W", "Credits", "% of used credits", "% of budget")
+    Supports two column schemas: the full nine-column schema used in regular
+    mode, and a compact three-column schema (model, requests, % of budget)
+    used when the terminal is small.
+    """
+
+    FULL_COLUMNS = (
+        "Model", "Reqs", "Input tok", "Output tok", "Cache R", "Cache W",
+        "Credits", "% of used credits", "% of budget",
+    )
+    COMPACT_COLUMNS = ("Model", "Reqs", "% budget")
+
+    MAX_MODEL_NAME_LEN = 24
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._compact = False
+        self._model_rows: list[tuple[str, dict]] = []
+        self._total_credits: float = 0.0
+        self._budget: float = DEFAULT_BUDGET
 
     def on_mount(self) -> None:
-        for col in self.COLUMNS:
+        self._rebuild_columns()
+
+    def _rebuild_columns(self) -> None:
+        self.clear(columns=True)
+        columns = self.COMPACT_COLUMNS if self._compact else self.FULL_COLUMNS
+        for col in columns:
             self.add_column(col, key=col)
 
-    def update_data(self, model_rows: list[tuple[str, dict]], total_credits: float, budget: float) -> None:
+    def set_compact(self, compact: bool) -> None:
+        """Switch column schema. No-op if already in the requested mode."""
+        if compact == self._compact:
+            return
+        self._compact = compact
+        self._rebuild_columns()
+        self._render_rows()
+
+    def update_data(
+        self,
+        model_rows: list[tuple[str, dict]],
+        total_credits: float,
+        budget: float,
+    ) -> None:
+        self._model_rows = model_rows
+        self._total_credits = total_credits
+        self._budget = budget
+        self._render_rows()
+
+    @classmethod
+    def _truncate(cls, name: str) -> str:
+        if len(name) <= cls.MAX_MODEL_NAME_LEN:
+            return name
+        return name[: cls.MAX_MODEL_NAME_LEN - 1] + "…"
+
+    def _render_rows(self) -> None:
         self.clear()
-        for model, m in model_rows:
-            cred_val = credits(m['usd'])
+        for model, m in self._model_rows:
+            cred_val = credits(m["usd"])
             cred = f"{cred_val:,.1f}" if m["priced"] else "?"
-            pct_used = f"{cred_val / total_credits * 100:.1f}%" if (m["priced"] and total_credits) else "?"
-            pct_budget = f"{cred_val / budget * 100:.2f}%" if (m["priced"] and budget) else "?"
-            self.add_row(
-                model,
-                f"{m['requests']:,}",
-                f"{m['input']:,}",
-                f"{m['output']:,}",
-                f"{m['cache_read']:,}",
-                f"{m['cache_write']:,}",
-                cred,
-                pct_used,
-                pct_budget,
+            pct_used = (
+                f"{cred_val / self._total_credits * 100:.1f}%"
+                if (m["priced"] and self._total_credits) else "?"
             )
+            pct_budget = (
+                f"{cred_val / self._budget * 100:.2f}%"
+                if (m["priced"] and self._budget) else "?"
+            )
+            name = self._truncate(model)
+            if self._compact:
+                self.add_row(name, f"{m['requests']:,}", pct_budget)
+            else:
+                self.add_row(
+                    name,
+                    f"{m['requests']:,}",
+                    f"{m['input']:,}",
+                    f"{m['output']:,}",
+                    f"{m['cache_read']:,}",
+                    f"{m['cache_write']:,}",
+                    cred,
+                    pct_used,
+                    pct_budget,
+                )
+
+
+class UsageSummary(Label):
+    """Always-visible summary of credits used, total budget, and percentage.
+
+    This is the highest-priority metric and must stay visible regardless of
+    terminal size or compact/regular mode.
+    """
+
+    def update_summary(self, total: float, budget: float) -> None:
+        pct = (total / budget * 100) if budget else 0.0
+        self.update(
+            f"{total:,.1f} / {budget:,.0f} credits used  ({pct:.1f}% of budget)"
+        )
 
 
 class StatusBar(Label):
@@ -329,10 +408,13 @@ class CreditEstimatorApp(App):
 
     CSS = """
     Tabs { dock: top; }
+    UsageSummary { width: 100%; height: auto; padding: 0 1; text-style: bold; }
     #main { height: 1fr; }
     CreditChart { height: 65%; border: round $primary; }
     ModelTable { height: 1fr; border: round $surface-lighten-2; }
     StatusBar { dock: bottom; height: 1; color: $text-muted; padding: 0 1; }
+    #main.compact CreditChart { display: none; }
+    #main.compact ModelTable { height: 1fr; }
     """
 
     BINDINGS = [
@@ -345,6 +427,7 @@ class CreditEstimatorApp(App):
     ]
 
     active_range: reactive[str] = reactive("month")
+    compact: reactive[bool] = reactive(False)
 
     def __init__(self, db: str, budget: float, interval: int):
         super().__init__()
@@ -355,10 +438,11 @@ class CreditEstimatorApp(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Tabs(
-            *[Tab(label, id=key) for key, label in RANGES],
+            *[Tab(label, id=key) for key, label, _ in RANGES],
             active="month",
             id="range-tabs",
         )
+        yield UsageSummary("", id="summary")
         with Vertical(id="main"):
             yield CreditChart(id="chart")
             yield ModelTable(id="table", zebra_stripes=True, cursor_type="none")
@@ -366,8 +450,36 @@ class CreditEstimatorApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        self._update_compact(self.size.width, self.size.height)
         self.refresh_data()
         self.set_interval(self.interval, self.refresh_data)
+
+    def on_resize(self, event: events.Resize) -> None:
+        self._update_compact(event.size.width, event.size.height)
+
+    def _update_compact(self, width: int, height: int) -> None:
+        self.compact = width < COMPACT_WIDTH or height < COMPACT_HEIGHT
+
+    def watch_compact(self, compact: bool) -> None:
+        main = self.query_one("#main", Vertical)
+        main.set_class(compact, "compact")
+
+        table = self.query_one("#table", ModelTable)
+        table.set_compact(compact)
+
+        self._update_tab_labels(compact)
+
+    def _update_tab_labels(self, compact: bool) -> None:
+        try:
+            tabs = self.query_one("#range-tabs", Tabs)
+        except Exception:
+            return
+        for key, full_label, short_label in RANGES:
+            try:
+                tab = tabs.query_one(f"#{key}", Tab)
+            except Exception:
+                continue
+            tab.label = short_label if compact else full_label
 
     @on(Tabs.TabActivated, "#range-tabs")
     def tab_activated(self, event: Tabs.TabActivated) -> None:
@@ -383,29 +495,32 @@ class CreditEstimatorApp(App):
 
     def refresh_data(self) -> None:
         range_key = self.active_range
-        range_label = dict(RANGES)[range_key]
+        range_label = {key: label for key, label, _ in RANGES}[range_key]
 
         start_ms, end_ms = range_bounds(range_key)
         rows = fetch_rows(self.db, start_ms, end_ms)
 
         labels, cumulative = build_series(rows, range_key)
         model_rows = summarize_by_model(rows)
+        total = cumulative[-1] if cumulative else 0.0
 
         chart = self.query_one("#chart", CreditChart)
         chart.update_data(labels, cumulative, range_label, self.budget)
 
         table = self.query_one("#table", ModelTable)
-        table.update_data(model_rows, cumulative[-1] if cumulative else 0.0, self.budget)
+        table.update_data(model_rows, total, self.budget)
+
+        summary = self.query_one("#summary", UsageSummary)
+        summary.update_summary(total, self.budget)
 
         now_str = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-        total = cumulative[-1] if cumulative else 0.0
-        pct = total / self.budget * 100 if self.budget else 0
         status = self.query_one("#status", StatusBar)
-        status.update(
-            f"Last updated: {now_str}  |  "
-            f"{total:,.1f} / {self.budget:,.0f} credits  ({pct:.1f}% of budget)  |  "
-            f"refreshes every {self.interval}s  |  q to quit"
-        )
+        parts = []
+        if self.size.width >= STATUS_TIME_MIN_WIDTH:
+            parts.append(f"Last updated: {now_str}")
+        parts.append(f"refreshes every {self.interval}s")
+        parts.append("q to quit")
+        status.update("  |  ".join(parts))
 
 
 # ---------------------------------------------------------------------------
