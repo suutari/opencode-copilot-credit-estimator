@@ -12,8 +12,8 @@ def make_app(db="/nonexistent/opencode.db", budget=50_000, interval=3600):
     return CreditEstimatorApp(db=db, budget=budget, interval=interval)
 
 
-def populated_rows():
-    return [{
+def populated_rows(requests=1):
+    row = {
         "ts_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
         "model": "claude-sonnet-with-a-very-long-model-name",
         "input": 1_000,
@@ -21,7 +21,8 @@ def populated_rows():
         "reasoning": 0,
         "cache_read": 0,
         "cache_write": 0,
-    }]
+    }
+    return [row] * requests
 
 
 @pytest.mark.asyncio
@@ -43,7 +44,7 @@ async def test_normal_size_shows_summary_chart_and_full_table():
 
 @pytest.mark.asyncio
 async def test_compact_size_hides_chart_and_narrows_table(monkeypatch):
-    monkeypatch.setattr(estimator, "fetch_rows", lambda *_: populated_rows())
+    monkeypatch.setattr(estimator, "fetch_rows", lambda *_: populated_rows(1_064))
     app = make_app()
     async with app.run_test(size=(40, 45)) as pilot:
         assert app.compact is True
@@ -61,6 +62,8 @@ async def test_compact_size_hides_chart_and_narrows_table(monkeypatch):
         table = app.query_one("#table", ModelTable)
         assert tuple(str(c.label) for c in table.columns.values()) == ModelTable.COMPACT_COLUMNS
         assert table.row_count == 1
+        assert table.get_cell_at((0, 1)) == "1,064"
+        assert tuple(table.columns.values())[1].width >= len("1,064")
         assert table.max_scroll_x == 0
 
 

@@ -311,7 +311,7 @@ class ModelTable(DataTable):
         "Credits", "% of used credits", "% of budget",
     )
     COMPACT_COLUMNS = ("Model", "Reqs", "% budget")
-    COMPACT_COLUMN_WIDTHS = (18, 4, 8)
+    COMPACT_COLUMN_WIDTHS = (15, 7, 8)
 
     MAX_MODEL_NAME_LEN = 24
 
