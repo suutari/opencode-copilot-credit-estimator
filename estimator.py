@@ -244,7 +244,7 @@ COMPACT_WIDTH = 80
 COMPACT_HEIGHT = 30
 
 # Below this width, the status bar drops the last-updated timestamp.
-STATUS_TIME_MIN_WIDTH = 50
+STATUS_TIME_MIN_WIDTH = 70
 
 
 class CreditChart(PlotextPlot):
@@ -311,6 +311,7 @@ class ModelTable(DataTable):
         "Credits", "% of used credits", "% of budget",
     )
     COMPACT_COLUMNS = ("Model", "Reqs", "% budget")
+    COMPACT_COLUMN_WIDTHS = (18, 4, 8)
 
     MAX_MODEL_NAME_LEN = 24
 
@@ -327,8 +328,9 @@ class ModelTable(DataTable):
     def _rebuild_columns(self) -> None:
         self.clear(columns=True)
         columns = self.COMPACT_COLUMNS if self._compact else self.FULL_COLUMNS
-        for col in columns:
-            self.add_column(col, key=col)
+        widths = self.COMPACT_COLUMN_WIDTHS if self._compact else (None,) * len(columns)
+        for col, width in zip(columns, widths):
+            self.add_column(col, key=col, width=width)
 
     def set_compact(self, compact: bool) -> None:
         """Switch column schema. No-op if already in the requested mode."""
@@ -456,6 +458,7 @@ class CreditEstimatorApp(App):
 
     def on_resize(self, event: events.Resize) -> None:
         self._update_compact(event.size.width, event.size.height)
+        self._update_status(event.size.width)
 
     def _update_compact(self, width: int, height: int) -> None:
         self.compact = width < COMPACT_WIDTH or height < COMPACT_HEIGHT
@@ -513,10 +516,13 @@ class CreditEstimatorApp(App):
         summary = self.query_one("#summary", UsageSummary)
         summary.update_summary(total, self.budget)
 
+        self._update_status()
+
+    def _update_status(self, width: int | None = None) -> None:
         now_str = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
         status = self.query_one("#status", StatusBar)
         parts = []
-        if self.size.width >= STATUS_TIME_MIN_WIDTH:
+        if (self.size.width if width is None else width) >= STATUS_TIME_MIN_WIDTH:
             parts.append(f"Last updated: {now_str}")
         parts.append(f"refreshes every {self.interval}s")
         parts.append("q to quit")

@@ -1,12 +1,27 @@
 """Headless Textual tests for the responsive compact layout."""
 
+from datetime import datetime, timezone
+
 import pytest
 
-from estimator import CreditEstimatorApp, ModelTable, UsageSummary
+import estimator
+from estimator import CreditEstimatorApp, ModelTable, StatusBar, UsageSummary
 
 
 def make_app(db="/nonexistent/opencode.db", budget=50_000, interval=3600):
     return CreditEstimatorApp(db=db, budget=budget, interval=interval)
+
+
+def populated_rows():
+    return [{
+        "ts_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
+        "model": "claude-sonnet-with-a-very-long-model-name",
+        "input": 1_000,
+        "output": 500,
+        "reasoning": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+    }]
 
 
 @pytest.mark.asyncio
@@ -27,7 +42,8 @@ async def test_normal_size_shows_summary_chart_and_full_table():
 
 
 @pytest.mark.asyncio
-async def test_compact_size_hides_chart_and_narrows_table():
+async def test_compact_size_hides_chart_and_narrows_table(monkeypatch):
+    monkeypatch.setattr(estimator, "fetch_rows", lambda *_: populated_rows())
     app = make_app()
     async with app.run_test(size=(40, 45)) as pilot:
         assert app.compact is True
@@ -44,6 +60,8 @@ async def test_compact_size_hides_chart_and_narrows_table():
 
         table = app.query_one("#table", ModelTable)
         assert tuple(str(c.label) for c in table.columns.values()) == ModelTable.COMPACT_COLUMNS
+        assert table.row_count == 1
+        assert table.max_scroll_x == 0
 
 
 @pytest.mark.asyncio
@@ -55,6 +73,8 @@ async def test_resize_across_breakpoint_switches_layout_both_ways():
         await pilot.resize_terminal(40, 45)
         await pilot.pause()
         assert app.compact is True
+        status = app.query_one("#status", StatusBar)
+        assert "Last updated:" not in str(status.content)
 
         table = app.query_one("#table", ModelTable)
         assert tuple(str(c.label) for c in table.columns.values()) == ModelTable.COMPACT_COLUMNS
@@ -63,6 +83,7 @@ async def test_resize_across_breakpoint_switches_layout_both_ways():
         await pilot.pause()
         assert app.compact is False
         assert tuple(str(c.label) for c in table.columns.values()) == ModelTable.FULL_COLUMNS
+        assert "Last updated:" in str(status.content)
 
 
 @pytest.mark.asyncio
