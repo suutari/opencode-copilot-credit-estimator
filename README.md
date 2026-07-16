@@ -66,9 +66,25 @@ The app opens on the **This month** tab by default. Tabs are selectable with `1`
 | `4` | This month | 1st → today | Daily |
 
 Each tab shows:
+- A **usage summary** — credits used, total budget, and percentage used — docked below the tabs. This is the highest-priority metric and stays visible at every terminal size.
 - A **cumulative line chart** of AI credits consumed over time. The Y axis scales automatically as usage grows.
 - A **per-model breakdown table** with requests, token counts (input, output, cache read/write), estimated credits, percentage of credits used, and percentage of monthly budget consumed.
-- A **status bar** showing last-updated time, total credits used, and percentage of budget.
+- A **status bar** showing last-updated time, refresh interval, and quit hint.
+
+### Compact mode
+
+When the terminal is small — narrower than about 80 columns or shorter than about 30 rows — the layout switches to a compact mode optimized for narrow panes (e.g. a sidebar terminal like Herdr):
+
+- The credit chart is hidden so it doesn't consume space.
+- The model table moves directly below the usage summary and expands to fill the remaining height.
+- The model table is limited to three columns: `Model`, `Reqs`, and `% budget`.
+- Tab labels shorten to `Hour`, `Today`, `Week`, and `Month`.
+- Long model names are truncated (never horizontally scrolled).
+- The last-updated timestamp is dropped from the status bar if the terminal is very narrow; refresh and quit hints always remain.
+
+The usage summary (credits used, budget, percentage) is always shown, in both compact and regular mode. Resizing the terminal across the breakpoint switches the layout automatically in both directions — no restart required.
+
+In regular mode, the full chart and complete nine-column model table (token counts, cache read/write, credits, `% used`, `% budget`) are shown, with the usage summary visible above the chart.
 
 ### Key bindings
 
