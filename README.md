@@ -31,6 +31,9 @@ uv run estimator.py --db /path/to/opencode.db
 
 # Change the auto-refresh interval
 uv run estimator.py --interval 15
+
+# Override the compact mode breakpoints
+uv run estimator.py --compact-width 100 --compact-height 40
 ```
 
 ### Non-interactive output
@@ -52,6 +55,8 @@ uv run estimator.py --output json
 | `--budget` | `50000` | Monthly AI credit budget to compare against |
 | `--db` | `~/.local/share/opencode/opencode.db` | Path to the opencode SQLite database |
 | `--interval` | `30` | Auto-refresh interval in seconds (TUI only) |
+| `--compact-width` | `80` | Terminal width (columns) below which compact mode activates |
+| `--compact-height` | `30` | Terminal height (rows) below which compact mode activates |
 | `--output` | — | Print monthly data as `table` or `json` and exit |
 
 ## TUI interface
@@ -73,7 +78,7 @@ Each tab shows:
 
 ### Compact mode
 
-When the terminal is small — narrower than about 80 columns or shorter than about 30 rows — the layout switches to a compact mode optimized for narrow panes (e.g. a sidebar terminal like Herdr):
+When the terminal is small — narrower than about 80 columns or shorter than about 30 rows — the layout switches to a compact mode optimized for narrow panes (e.g. a sidebar terminal like Herdr). The thresholds can be adjusted with `--compact-width` and `--compact-height`:
 
 - The credit chart is hidden so it doesn't consume space.
 - The model table moves directly below the usage summary and expands to fill the remaining height.

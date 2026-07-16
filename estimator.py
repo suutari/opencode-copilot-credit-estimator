@@ -431,11 +431,14 @@ class CreditEstimatorApp(App):
     active_range: reactive[str] = reactive("month")
     compact: reactive[bool] = reactive(False)
 
-    def __init__(self, db: str, budget: float, interval: int):
+    def __init__(self, db: str, budget: float, interval: int,
+                 compact_width: int = COMPACT_WIDTH, compact_height: int = COMPACT_HEIGHT):
         super().__init__()
         self.db = db
         self.budget = budget
         self.interval = interval
+        self.compact_width = compact_width
+        self.compact_height = compact_height
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -461,7 +464,7 @@ class CreditEstimatorApp(App):
         self._update_status(event.size.width)
 
     def _update_compact(self, width: int, height: int) -> None:
-        self.compact = width < COMPACT_WIDTH or height < COMPACT_HEIGHT
+        self.compact = width < self.compact_width or height < self.compact_height
 
     def watch_compact(self, compact: bool) -> None:
         main = self.query_one("#main", Vertical)
@@ -599,6 +602,10 @@ def main() -> None:
                     help="Path to opencode's SQLite database")
     ap.add_argument("--interval", type=int, default=DEFAULT_INTERVAL,
                     help=f"Auto-refresh interval in seconds (default {DEFAULT_INTERVAL})")
+    ap.add_argument("--compact-width", type=int, default=COMPACT_WIDTH,
+                    help=f"Terminal width threshold below which compact mode activates (default {COMPACT_WIDTH})")
+    ap.add_argument("--compact-height", type=int, default=COMPACT_HEIGHT,
+                    help=f"Terminal height threshold below which compact mode activates (default {COMPACT_HEIGHT})")
     ap.add_argument("--output", choices=["json", "table"], default=None,
                     help="Print monthly data in the given format and exit (no TUI)")
     args = ap.parse_args()
@@ -614,7 +621,8 @@ def main() -> None:
             output_table(model_rows, total, args.budget)
         return
 
-    app = CreditEstimatorApp(db=args.db, budget=args.budget, interval=args.interval)
+    app = CreditEstimatorApp(db=args.db, budget=args.budget, interval=args.interval,
+                             compact_width=args.compact_width, compact_height=args.compact_height)
     app.run()
 
 
