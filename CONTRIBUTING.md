@@ -29,7 +29,7 @@ This project uses [Semantic Versioning](https://semver.org/) with `vX.Y.Z` git t
 5. Tag and push:
 
    ```sh
-   git tag vX.Y.Z
+   git tag -a vX.Y.Z -m "Release vX.Y.Z"
    git push origin main --tags
    ```
 
@@ -38,8 +38,6 @@ This project uses [Semantic Versioning](https://semver.org/) with `vX.Y.Z` git t
    Release using the matching `CHANGELOG.md` section as the release notes.
    You do **not** need to create the release by hand.
 
-6. Update the Homebrew formula in `springernature/homebrew-opensource` per the
-   steps in `AGENTS.md` (versioned `url` + `sha256`, regenerate `resource`
-   blocks from `uv.lock`, and ship any new runtime files added since the last
-   release). This step is still manual — a release is not finished until the
-   tap is updated.
+6. The Homebrew formula in `springernature/homebrew-opensource` updates itself
+   via a workflow in that repo when the release is tagged — no manual formula
+   change is needed here.

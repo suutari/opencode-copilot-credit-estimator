@@ -98,8 +98,3 @@ jobs:
             fi
           fi
 
-      - name: Homebrew tap reminder
-        env:
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: |
-          echo "::notice::GitHub Release ${TAG} published. Remember to update the Homebrew formula in springernature/homebrew-opensource per AGENTS.md (url + sha256, regenerate resources from uv.lock, ship any new runtime files)."
