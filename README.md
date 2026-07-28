@@ -2,18 +2,6 @@
 
 Occe is a terminal UI for monitoring your [GitHub Copilot](https://github.com/features/copilot) AI credit consumption in real time, sourced from [opencode](https://opencode.ai) session logs.
 
-## Supported platforms
-
-- macOS and Linux (anywhere `opencode` writes its SQLite log to `~/.local/share/opencode/opencode.db`).
-- Windows is not currently tested.
-- Requires a terminal emulator supported by [Textual](https://textual.textualize.io/), e.g. iTerm2 or Alacritty.
-
-## How it works
-
-opencode logs every LLM request to a local SQLite database at `~/.local/share/opencode/opencode.db`, including token counts (input, output, reasoning, cache read/write) and the model used. This tool reads those logs, applies GitHub's published per-model token pricing, and displays a cumulative line chart of AI credit usage — updated automatically on a configurable interval.
-
-> **Note:** This is a local estimate based only on requests made through opencode on this machine. It does not include Copilot usage from other IDEs or clients, and it may not exactly match GitHub's actual billing (rounding, promo pricing windows, price changes, etc). See your [GitHub Copilot usage dashboard](https://github.com/settings/copilot/features) for the authoritative figure.
-
 ## Installation
 
 ### Homebrew (macOS/Linux)
@@ -38,6 +26,18 @@ Dependencies (`textual`, `textual-plotext`) are managed by uv and installed auto
 Clone this repository and run it directly with `uv` (see [Usage](#usage) below) — no separate install step is required.
 
 </details>
+
+## How it works
+
+opencode logs every LLM request to a local SQLite database at `~/.local/share/opencode/opencode.db`, including token counts (input, output, reasoning, cache read/write) and the model used. This tool reads those logs, applies GitHub's published per-model token pricing, and displays a cumulative line chart of AI credit usage — updated automatically on a configurable interval.
+
+> **Note:** This is a local estimate based only on requests made through opencode on this machine. It does not include Copilot usage from other IDEs or clients, and it may not exactly match GitHub's actual billing (rounding, promo pricing windows, price changes, etc). See your [GitHub Copilot usage dashboard](https://github.com/settings/copilot/features) for the authoritative figure.
+
+## Supported platforms
+
+- macOS and Linux (anywhere `opencode` writes its SQLite log to `~/.local/share/opencode/opencode.db`).
+- Windows is not currently tested.
+- Requires a terminal emulator supported by [Textual](https://textual.textualize.io/), e.g. iTerm2 or Alacritty.
 
 ## Usage
 
