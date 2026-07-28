@@ -21,25 +21,43 @@ opencode logs every LLM request to a local SQLite database at `~/.local/share/op
 
 Dependencies (`textual`, `textual-plotext`) are managed by uv and installed automatically on first run.
 
+## Installation
+
+### Homebrew (macOS/Linux)
+
+```sh
+brew tap springernature/opensource
+brew install springernature/opensource/occe
+```
+
+### From source
+
+<details>
+<summary>Clone this repository and run it directly with <code>uv</code></summary>
+
+Clone this repository and run it directly with `uv` (see [Usage](#usage) below) — no separate install step is required.
+
+</details>
+
 ## Usage
 
 ### TUI (default)
 
 ```sh
 # Launch the interactive TUI (defaults: budget 50,000 credits, refresh every 30s)
-uv run estimator.py
+occe
 
 # Set a custom monthly budget
-uv run estimator.py --budget 30000
+occe --budget 30000
 
 # Point to a non-default database location
-uv run estimator.py --db /path/to/opencode.db
+occe --db /path/to/opencode.db
 
 # Change the auto-refresh interval
-uv run estimator.py --interval 15
+occe --interval 15
 
 # Override the compact mode breakpoints
-uv run estimator.py --compact-width 100 --compact-height 40
+occe --compact-width 100 --compact-height 40
 ```
 
 ### Non-interactive output
@@ -48,10 +66,10 @@ Use `--output` to print this month's data and exit without launching the TUI:
 
 ```sh
 # Human-readable table
-uv run estimator.py --output table
+occe --output table
 
 # JSON (useful for scripting/piping)
-uv run estimator.py --output json
+occe --output json
 ```
 
 ## Options
