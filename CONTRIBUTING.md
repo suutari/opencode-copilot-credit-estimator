@@ -23,14 +23,23 @@ This project uses [Semantic Versioning](https://semver.org/) with `vX.Y.Z` git t
 
 1. Move the `[Unreleased]` entries in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD` heading.
 2. Bump `version` in `pyproject.toml` to match.
-3. Commit as `chore: release vX.Y.Z`.
-4. Tag and push:
+3. Refresh the bundled pricing snapshot: `uv run pricing.py --update-snapshot`
+   (commit it if it changed).
+4. Commit as `chore: release vX.Y.Z`.
+5. Tag and push:
 
    ```sh
    git tag vX.Y.Z
    git push origin main --tags
    ```
 
-5. Create a GitHub Release from the tag (title `vX.Y.Z`, description from the changelog entry).
+   Pushing the tag triggers `.github/workflows/release.yml`, which runs the
+   tests, verifies the tag matches `pyproject.toml`, and creates the GitHub
+   Release using the matching `CHANGELOG.md` section as the release notes.
+   You do **not** need to create the release by hand.
 
-A tag-triggered release workflow (building artifacts for the Homebrew tap) can be added under `.github/workflows/` once the tap is ready to consume it.
+6. Update the Homebrew formula in `springernature/homebrew-opensource` per the
+   steps in `AGENTS.md` (versioned `url` + `sha256`, regenerate `resource`
+   blocks from `uv.lock`, and ship any new runtime files added since the last
+   release). This step is still manual — a release is not finished until the
+   tap is updated.
