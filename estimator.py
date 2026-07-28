@@ -439,6 +439,7 @@ class CreditEstimatorApp(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
         Binding("r", "refresh", "Refresh now"),
         Binding("1", "switch_tab('hour')", "Last hour"),
         Binding("2", "switch_tab('today')", "Today"),

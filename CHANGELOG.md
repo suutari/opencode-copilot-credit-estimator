@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The TUI can now be quit with `Ctrl+C` in addition to `q`.
+
 ### Changed
 
 - Release process no longer requires a manual Homebrew formula bump; the tap in `springernature/homebrew-opensource` self-updates via its own workflow when a release is tagged. Removed the manual formula steps from `AGENTS.md`/`CONTRIBUTING.md` and the "Homebrew tap reminder" step from the release workflow.
