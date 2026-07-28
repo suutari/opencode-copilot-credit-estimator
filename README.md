@@ -1,8 +1,6 @@
-# opencode Copilot Credit Estimator
+# OpenCode Copilot Credit Estimator (Occe)
 
-A terminal UI for monitoring your [GitHub Copilot](https://github.com/features/copilot) AI credit consumption in real time, sourced from [opencode](https://opencode.ai) session logs.
-
-Current version: `0.1.0` (pre-1.0, interface and CLI flags may still change). See [CHANGELOG.md](CHANGELOG.md) for release history.
+Occe is a terminal UI for monitoring your [GitHub Copilot](https://github.com/features/copilot) AI credit consumption in real time, sourced from [opencode](https://opencode.ai) session logs.
 
 ## Supported platforms
 
