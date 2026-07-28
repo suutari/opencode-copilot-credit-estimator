@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-28
+
 ### Added
 
 - Usage summary now shows a "Budget resets in <n> days" line, counting down to the first day of the next month (shows "Budget resets tomorrow" when only one day remains).

@@ -1,6 +1,6 @@
 [project]
 name = "opencode-copilot-credit-estimator"
-version = "0.2.0"
+version = "0.3.0"
 description = "Terminal UI for monitoring GitHub Copilot AI credit consumption from opencode session logs."
 readme = "README.md"
 license = "MIT"
