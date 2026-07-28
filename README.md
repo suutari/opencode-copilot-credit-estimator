@@ -82,6 +82,7 @@ occe --output json
 | `--compact-width` | `80` | Terminal width (columns) below which compact mode activates |
 | `--compact-height` | `30` | Terminal height (rows) below which compact mode activates |
 | `--output` | — | Print monthly data as `table` or `json` and exit |
+| `--offline` | off | Skip network pricing refresh; use cached/bundled pricing only |
 
 ## TUI interface
 
@@ -125,7 +126,14 @@ In regular mode, the full chart and complete nine-column model table (token coun
 
 ## Pricing
 
-Prices are sourced from [GitHub Copilot model documentation](https://docs.github.com/en/copilot/using-github-copilot/ai-models/choosing-an-ai-model-for-copilot) and hardcoded in `estimator.py`. Update the `PRICING` dict in the script if prices change or new models are added.
+Prices are parsed automatically from GitHub's own published pricing page (`https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing.md`) by `pricing.py`, rather than hardcoded.
+
+- On startup, pricing is loaded from a local cache (`~/.cache/opencode-copilot-credit-estimator/github-copilot-pricing.json`), falling back to a bundled snapshot (`resources/github-copilot-pricing-snapshot.json`) committed to the repo if there's no cache yet.
+- If the resolved pricing is missing or more than 24 hours old, a refresh is attempted automatically: synchronously before `--output` runs, or in the background (without blocking the UI) for the TUI. If the network is unavailable, the existing pricing is kept as-is — the tool always works offline.
+- Pass `--offline` to skip network refreshes entirely and only use cached/bundled pricing.
+- Maintainers can regenerate the bundled snapshot with `uv run pricing.py --update-snapshot`.
+
+Model names in GitHub's docs don't always match opencode's `modelID` exactly (e.g. promo/preview qualifiers). Known mismatches are patched in `pricing.py`'s `ALIAS_OVERRIDES`; if a model you use shows up as unpriced (`?`), it may need an entry there.
 
 1 AI credit = $0.01 USD.
 

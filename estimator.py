@@ -35,6 +35,8 @@ from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Header, Label, Tab, Tabs
 from textual_plotext import PlotextPlot
 
+import pricing as pricing_source
+
 # ---------------------------------------------------------------------------
 # Pricing
 # ---------------------------------------------------------------------------
@@ -43,24 +45,14 @@ DEFAULT_DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
 DEFAULT_BUDGET = 50_000
 DEFAULT_INTERVAL = 30  # seconds
 
-# Per 1,000,000 tokens in USD: (input, cached_input, cache_write, output)
-# Source: GitHub Copilot docs, checked 2026-07-15.
-PRICING: dict[str, tuple[float, float, float | None, float]] = {
-    "claude-haiku-4.5":       (1.00,  0.10,  1.25,  5.00),
-    "claude-sonnet-4":        (3.00,  0.30,  3.75, 15.00),
-    "claude-sonnet-4.5":      (3.00,  0.30,  3.75, 15.00),
-    "claude-sonnet-4.6":      (3.00,  0.30,  3.75, 15.00),
-    "claude-opus-4.5":        (5.00,  0.50,  6.25, 25.00),
-    "claude-opus-4.6":        (5.00,  0.50,  6.25, 25.00),
-    "claude-opus-4.7":        (5.00,  0.50,  6.25, 25.00),
-    "claude-opus-4.8":        (5.00,  0.50,  6.25, 25.00),
-    "claude-opus-4.8-fast":  (10.00,  1.00, 12.50, 50.00),
-    "claude-sonnet-5":        (2.00,  0.20,  2.50, 10.00),  # promo thru 2026-08-31
-    "kimi-k2.7-code":         (0.95,  0.19,  None,  4.00),
-    "gemini-2.5-pro":         (1.25, 0.125,  None, 10.00),
-    "gemini-3.1-pro-preview": (2.00,  0.20,  None, 12.00),
-    "gpt-5.3-codex":          (1.75, 0.175,  None, 14.00),
-}
+# Per 1,000,000 tokens in USD: (input, cached_input, cache_write, output).
+# Sourced from GitHub's published Copilot pricing docs (see pricing.py),
+# cached on disk and refreshed automatically when stale. Populated here from
+# the on-disk cache / bundled snapshot only (no network call at import time);
+# `main()` and the TUI's background refresh may update it with live data.
+PRICING: dict[str, tuple[float, float, float | None, float]]
+PRICING_META: pricing_source.PricingMeta
+PRICING, PRICING_META = pricing_source.load_pricing(refresh=False)
 
 # ---------------------------------------------------------------------------
 # Data layer
@@ -439,13 +431,15 @@ class CreditEstimatorApp(App):
     compact: reactive[bool] = reactive(False)
 
     def __init__(self, db: str, budget: float, interval: int,
-                 compact_width: int = COMPACT_WIDTH, compact_height: int = COMPACT_HEIGHT):
+                 compact_width: int = COMPACT_WIDTH, compact_height: int = COMPACT_HEIGHT,
+                 offline: bool = False):
         super().__init__()
         self.db = db
         self.budget = budget
         self.interval = interval
         self.compact_width = compact_width
         self.compact_height = compact_height
+        self.offline = offline
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -465,6 +459,20 @@ class CreditEstimatorApp(App):
         self._update_compact(self.size.width, self.size.height)
         self.refresh_data()
         self.set_interval(self.interval, self.refresh_data)
+        if not self.offline:
+            self.run_worker(self._refresh_pricing, thread=True, exclusive=True)
+
+    def _refresh_pricing(self) -> None:
+        """Refresh the GitHub Copilot pricing table in a background thread.
+
+        Only does anything if the cached/bundled snapshot is stale; on any
+        failure (offline, parsing error) the existing table is left as-is.
+        """
+        global PRICING, PRICING_META
+        table, meta = pricing_source.load_pricing(refresh=True)
+        if table:
+            PRICING, PRICING_META = table, meta
+            self.call_from_thread(self.refresh_data)
 
     def on_resize(self, event: events.Resize) -> None:
         self._update_compact(event.size.width, event.size.height)
@@ -565,6 +573,8 @@ def output_json(model_rows: list[tuple[str, dict]], total_credits: float, budget
         "total_credits": round(total_credits, 4),
         "pct_of_budget": round(total_credits / budget * 100, 2) if budget else None,
         "models": rows,
+        "pricing_source": PRICING_META.get("source"),
+        "pricing_retrieved_at": PRICING_META.get("retrieved_at"),
     }, indent=2))
 
 
@@ -591,6 +601,9 @@ def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budge
     print(f"{'TOTAL':<26} {'':>6} {'':>12} {'':>10} {'':>10} {'':>10} "
           f"{total_credits:>10,.1f} {'100.0%':>8} {pct_budget_total:>9.2f}%")
     print(f"\nBudget: {budget:,.0f} AI credits")
+    retrieved_at = PRICING_META.get("retrieved_at")
+    if retrieved_at:
+        print(f"Pricing last refreshed: {retrieved_at}")
     print("Local estimate from opencode logs only — https://github.com/settings/copilot/features for actuals.")
 
 
@@ -615,7 +628,13 @@ def main() -> None:
                     help=f"Terminal height threshold below which compact mode activates (default {COMPACT_HEIGHT})")
     ap.add_argument("--output", choices=["json", "table"], default=None,
                     help="Print monthly data in the given format and exit (no TUI)")
+    ap.add_argument("--offline", action="store_true",
+                    help="Never fetch pricing over the network; use cached/bundled pricing only")
     args = ap.parse_args()
+
+    global PRICING, PRICING_META
+    if not args.offline:
+        PRICING, PRICING_META = pricing_source.load_pricing(refresh=True)
 
     if args.output:
         start_ms, end_ms = range_bounds("month")
@@ -629,7 +648,8 @@ def main() -> None:
         return
 
     app = CreditEstimatorApp(db=args.db, budget=args.budget, interval=args.interval,
-                             compact_width=args.compact_width, compact_height=args.compact_height)
+                             compact_width=args.compact_width, compact_height=args.compact_height,
+                             offline=args.offline)
     app.run()
 
 
