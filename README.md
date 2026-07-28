@@ -14,13 +14,6 @@ opencode logs every LLM request to a local SQLite database at `~/.local/share/op
 
 > **Note:** This is a local estimate based only on requests made through opencode on this machine. It does not include Copilot usage from other IDEs or clients, and it may not exactly match GitHub's actual billing (rounding, promo pricing windows, price changes, etc). See your [GitHub Copilot usage dashboard](https://github.com/settings/copilot/features) for the authoritative figure.
 
-## Requirements
-
-- Python 3.10+
-- [uv](https://docs.astral.sh/uv/)
-
-Dependencies (`textual`, `textual-plotext`) are managed by uv and installed automatically on first run.
-
 ## Installation
 
 ### Homebrew (macOS/Linux)
@@ -34,6 +27,13 @@ brew install springernature/opensource/occe
 
 <details>
 <summary>Clone this repository and run it directly with <code>uv</code></summary>
+
+Requirements:
+
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/)
+
+Dependencies (`textual`, `textual-plotext`) are managed by uv and installed automatically on first run.
 
 Clone this repository and run it directly with `uv` (see [Usage](#usage) below) — no separate install step is required.
 
