@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `uv.lock` project version was out of sync with `pyproject.toml` (stuck at `0.1.0`); resynced to `0.2.0`. CI and release workflows now run `uv lock --check` to fail fast if the lockfile drifts again.
 
+### Changed
+
+- Added `scripts/preflight.sh` as the single source of truth for the validation gates (lock check, dependency install, tests, compile check, and — with a version argument — the tag/version and changelog checks). CI and the release workflow now call it instead of duplicating the individual steps.
+
 ## [0.2.0] - 2026-07-28
 
 ### Added
