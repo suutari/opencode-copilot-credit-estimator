@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build a release for, e.g. v0.2.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,7 +18,25 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          case "$tag" in
+            v*) ;;
+            *) echo "::error::Tag '$tag' must start with 'v' (e.g. v1.2.3)"; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $tag"
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -32,22 +56,24 @@ jobs:
         run: uv run python -m py_compile estimator.py pricing.py
 
       - name: Verify tag matches pyproject version
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          tag="${GITHUB_REF_NAME#v}"
           proj="$(uv run python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
-          if [ "$tag" != "$proj" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME (version $tag) does not match pyproject.toml version $proj"
+          if [ "$VERSION" != "$proj" ]; then
+            echo "::error::Tag version $VERSION does not match pyproject.toml version $proj"
             exit 1
           fi
           echo "Tag and pyproject version agree: $proj"
 
       - name: Extract changelog section
         id: changelog
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          notes="$(python scripts/extract_changelog.py "$version")"
+          notes="$(python scripts/extract_changelog.py "$VERSION")"
           if [ -z "$notes" ]; then
-            echo "::error::No CHANGELOG.md section found for version $version"
+            echo "::error::No CHANGELOG.md section found for version $VERSION"
             exit 1
           fi
           {
@@ -59,11 +85,18 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          NOTES: ${{ steps.changelog.outputs.notes }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --notes "${{ steps.changelog.outputs.notes }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists; updating its notes."
+            gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" --title "$TAG" --notes "$NOTES"
+          fi
 
       - name: Homebrew tap reminder
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          echo "::notice::GitHub Release ${GITHUB_REF_NAME} published. Remember to update the Homebrew formula in springernature/homebrew-opensource per AGENTS.md (url + sha256, regenerate resources from uv.lock, ship any new runtime files)."
+          echo "::notice::GitHub Release ${TAG} published. Remember to update the Homebrew formula in springernature/homebrew-opensource per AGENTS.md (url + sha256, regenerate resources from uv.lock, ship any new runtime files)."
