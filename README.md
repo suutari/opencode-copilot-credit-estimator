@@ -8,7 +8,7 @@ Current version: `0.1.0` (pre-1.0, interface and CLI flags may still change). Se
 
 - macOS and Linux (anywhere `opencode` writes its SQLite log to `~/.local/share/opencode/opencode.db`).
 - Windows is not currently tested.
-- Requires a terminal emulator supported by [Textual](https://textual.textualize.io/).
+- Requires a terminal emulator supported by [Textual](https://textual.textualize.io/), e.g. iTerm2 or Alacritty.
 
 ## How it works
 
