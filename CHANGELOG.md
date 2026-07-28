@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Usage summary now shows a "Budget resets in <n> days" line, counting down to the first day of the next month (shows "Budget resets tomorrow" when only one day remains).
 
+### Fixed
+
+- `uv.lock` project version was out of sync with `pyproject.toml` (stuck at `0.1.0`); resynced to `0.2.0`. CI and release workflows now run `uv lock --check` to fail fast if the lockfile drifts again.
+
 ## [0.2.0] - 2026-07-28
 
 ### Added
