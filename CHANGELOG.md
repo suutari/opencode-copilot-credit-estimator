@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-28
+
+### Added
+
+- Automated GitHub Copilot pricing: rates are now fetched and parsed from GitHub's published pricing page (`pricing.py`) instead of a hardcoded dict, expanding coverage from 14 to 29 models.
+- Offline-first pricing cache (`~/.cache/opencode-copilot-credit-estimator/`) with a bundled fallback snapshot; live refresh only when stale (>24h).
+- `--offline` flag to skip all network pricing refreshes.
+- `pricing_source`/`pricing_retrieved_at` reported in JSON output and a "Pricing last refreshed" line in table output.
+- Maintainer command `uv run pricing.py --update-snapshot` to regenerate the bundled snapshot.
+
+### Changed
+
+- Pricing is refreshed synchronously before `--output` runs and in a non-blocking background worker in the TUI.
+
 ## [0.1.0] - 2026-07-28
 
 ### Added
