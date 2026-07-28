@@ -125,6 +125,18 @@ def credits(usd: float) -> float:
     return usd * 100  # 1 AI credit = $0.01 USD
 
 
+def days_until_budget_reset(now: datetime | None = None) -> int:
+    """Whole days until the budget resets on the first of next month (local time)."""
+    if now is None:
+        now = datetime.now().astimezone()
+    today = now.date()
+    if today.month == 12:
+        reset = today.replace(year=today.year + 1, month=1, day=1)
+    else:
+        reset = today.replace(month=today.month + 1, day=1)
+    return (reset - today).days
+
+
 def build_series(
     rows: list[dict], range_key: str
 ) -> tuple[list[str], list[float]]:
@@ -395,8 +407,15 @@ class UsageSummary(Label):
 
     def update_summary(self, total: float, budget: float) -> None:
         pct = (total / budget * 100) if budget else 0.0
+        days = days_until_budget_reset()
+        reset_line = (
+            "Budget resets tomorrow"
+            if days == 1
+            else f"Budget resets in {days} days"
+        )
         self.update(
-            f"{total:,.1f} / {budget:,.0f} credits used  ({pct:.1f}% of budget)"
+            f"{total:,.1f} / {budget:,.0f} credits used  ({pct:.1f}% of budget)\n"
+            f"{reset_line}"
         )
 
 
