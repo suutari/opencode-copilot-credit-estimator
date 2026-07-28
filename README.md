@@ -2,6 +2,14 @@
 
 A terminal UI for monitoring your [GitHub Copilot](https://github.com/features/copilot) AI credit consumption in real time, sourced from [opencode](https://opencode.ai) session logs.
 
+Current version: `0.1.0` (pre-1.0, interface and CLI flags may still change). See [CHANGELOG.md](CHANGELOG.md) for release history.
+
+## Supported platforms
+
+- macOS and Linux (anywhere `opencode` writes its SQLite log to `~/.local/share/opencode/opencode.db`).
+- Windows is not currently tested.
+- Requires a terminal emulator supported by [Textual](https://textual.textualize.io/).
+
 ## How it works
 
 opencode logs every LLM request to a local SQLite database at `~/.local/share/opencode/opencode.db`, including token counts (input, output, reasoning, cache read/write) and the model used. This tool reads those logs, applies GitHub's published per-model token pricing, and displays a cumulative line chart of AI credit usage — updated automatically on a configurable interval.
@@ -104,3 +112,12 @@ In regular mode, the full chart and complete nine-column model table (token coun
 Prices are sourced from [GitHub Copilot model documentation](https://docs.github.com/en/copilot/using-github-copilot/ai-models/choosing-an-ai-model-for-copilot) and hardcoded in `estimator.py`. Update the `PRICING` dict in the script if prices change or new models are added.
 
 1 AI credit = $0.01 USD.
+
+## License
+
+Released under the [MIT License](LICENSE).
+
+## Maintenance & support
+
+This project is maintained by Springer Nature on a best-effort basis. Bug reports and pull requests are welcome via [GitHub Issues](https://github.com/springernature/opencode-copilot-credit-estimator/issues). There is no guaranteed response time or SLA.
+

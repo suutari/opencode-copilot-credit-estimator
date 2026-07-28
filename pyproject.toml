@@ -1,8 +1,10 @@
 [project]
 name = "opencode-copilot-credit-estimator"
 version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.14"
+description = "Terminal UI for monitoring GitHub Copilot AI credit consumption from opencode session logs."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
 dependencies = [
     "textual>=8.2.8",
     "textual-plotext>=1.0.1",
