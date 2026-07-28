@@ -71,11 +71,22 @@ jobs:
         env:
           VERSION: ${{ steps.tag.outputs.version }}
         run: |
+          # The script and CHANGELOG entry are committed before the tag on a
+          # normal release, so this succeeds. If either is absent (e.g. running
+          # against an old tag that predates the script), fall back to
+          # auto-generated notes rather than failing the release.
+          if [ ! -f scripts/extract_changelog.py ]; then
+            echo "::warning::scripts/extract_changelog.py not present at this tag; using auto-generated notes."
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           notes="$(python scripts/extract_changelog.py "$VERSION")"
           if [ -z "$notes" ]; then
-            echo "::error::No CHANGELOG.md section found for version $VERSION"
-            exit 1
+            echo "::warning::No CHANGELOG.md section for $VERSION; using auto-generated notes."
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "generate=false" >> "$GITHUB_OUTPUT"
           {
             echo "notes<<CHANGELOG_EOF"
             echo "$notes"
@@ -87,12 +98,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
           NOTES: ${{ steps.changelog.outputs.notes }}
+          GENERATE: ${{ steps.changelog.outputs.generate }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::notice::Release $TAG already exists; updating its notes."
-            gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
+            echo "::notice::Release $TAG already exists."
+            if [ "$GENERATE" = "true" ]; then
+              echo "::notice::No changelog notes available; leaving existing release notes unchanged."
+            else
+              gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
+            fi
           else
-            gh release create "$TAG" --title "$TAG" --notes "$NOTES"
+            if [ "$GENERATE" = "true" ]; then
+              gh release create "$TAG" --title "$TAG" --generate-notes
+            else
+              gh release create "$TAG" --title "$TAG" --notes "$NOTES"
+            fi
           fi
 
       - name: Homebrew tap reminder
