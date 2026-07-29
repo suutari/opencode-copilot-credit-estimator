@@ -1,0 +1,4 @@
+# Default owners for everything in this repository.
+# These owners are automatically requested for review on pull requests,
+# and are used by the Homebrew tap's automated formula-update workflow.
+* @sonniesedge
