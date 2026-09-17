@@ -131,7 +131,10 @@ def test_load_pricing_without_refresh_uses_bundled_snapshot_when_no_cache(tmp_pa
         cache_path=missing_cache,
         bundled_path=pricing.BUNDLED_SNAPSHOT_PATH,
     )
-    assert "claude-sonnet-4.5" in table
+    # Deliberately model-agnostic: the bundled snapshot tracks GitHub's live
+    # model list, so individual model names come and go between refreshes.
+    assert table
+    assert all(len(prices) == 4 for prices in table.values())
     assert meta["source"] == pricing.GITHUB_PRICING_URL
 
 

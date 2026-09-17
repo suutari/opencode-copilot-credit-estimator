@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-17
+
 ### Added
 
 - `--output json` now also reports `remaining_credits`, `pct_remaining` and `days_until_reset` for the current month, and `--output table` prints a matching `Remaining:` line under the totals.
@@ -16,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Release process no longer requires a manual Homebrew formula bump; the tap in `springernature/homebrew-opensource` self-updates via its own workflow when a release is tagged. Removed the manual formula steps from `AGENTS.md`/`CONTRIBUTING.md` and the "Homebrew tap reminder" step from the release workflow.
+- Refreshed the bundled pricing snapshot from GitHub's published model pricing.
 
 ## [0.3.0] - 2026-07-28
 
