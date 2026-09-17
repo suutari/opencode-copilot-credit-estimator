@@ -106,3 +106,47 @@ async def test_zero_budget_state():
         summary = app.query_one("#summary", UsageSummary)
         # Should not raise a ZeroDivisionError and should render something sane.
         assert "/ 0 credits used" in str(summary.content)
+
+
+# --- --remaining / JSON output ---------------------------------------------
+
+def test_output_remaining_is_bare_number(capsys):
+    estimator.output_remaining(12_500.0, 50_000.0)
+    assert capsys.readouterr().out == "37500.0\n"
+
+
+def test_output_remaining_can_exceed_budget(capsys):
+    estimator.output_remaining(60_000.0, 50_000.0)
+    assert capsys.readouterr().out == "-10000.0\n"
+
+
+def test_output_table_shows_remaining(capsys):
+    estimator.output_table([], 12_500.0, 50_000.0)
+    out = capsys.readouterr().out
+    assert "Remaining: 37,500.0 AI credits (75.0%)" in out
+    assert "budget resets" in out
+
+
+def test_output_table_zero_budget_omits_remaining_percentage(capsys):
+    estimator.output_table([], 10.0, 0)
+    assert "Remaining: -10.0 AI credits \u2014 budget resets" in capsys.readouterr().out
+
+
+def test_output_json_includes_remaining(capsys):
+    import json
+
+    estimator.output_json([], 12_500.0, 50_000.0)
+    data = json.loads(capsys.readouterr().out)
+    assert data["total_credits"] == 12_500.0
+    assert data["remaining_credits"] == 37_500.0
+    assert data["pct_remaining"] == 75.0
+    assert data["days_until_reset"] >= 1
+
+
+def test_output_json_remaining_with_zero_budget(capsys):
+    import json
+
+    estimator.output_json([], 10.0, 0)
+    data = json.loads(capsys.readouterr().out)
+    assert data["remaining_credits"] == -10.0
+    assert data["pct_remaining"] is None

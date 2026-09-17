@@ -72,6 +72,23 @@ occe --output table
 occe --output json
 ```
 
+### Remaining budget
+
+`--output json` always reports `remaining_credits`, `pct_remaining` and
+`days_until_reset` alongside the usage figures, and `--output table` prints a
+`Remaining:` line under the totals. `pct_remaining` is `null` when `--budget 0`
+is used, and remaining goes negative once you are over budget.
+
+For just the number, use `--remaining`, which prints a bare value and nothing
+else:
+
+```sh
+occe --remaining
+# 37500.0
+```
+
+`--remaining` cannot be combined with `--output`.
+
 ## Options
 
 | Flag | Default | Description |
@@ -82,6 +99,7 @@ occe --output json
 | `--compact-width` | `80` | Terminal width (columns) below which compact mode activates |
 | `--compact-height` | `30` | Terminal height (rows) below which compact mode activates |
 | `--output` | — | Print monthly data as `table` or `json` and exit |
+| `--remaining` | off | Print the number of AI credits left this month and exit (not combinable with `--output`) |
 | `--offline` | off | Skip network pricing refresh; use cached/bundled pricing only |
 
 ## TUI interface

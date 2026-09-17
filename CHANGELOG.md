@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `--output json` now also reports `remaining_credits`, `pct_remaining` and `days_until_reset` for the current month, and `--output table` prints a matching `Remaining:` line under the totals.
+- New `--remaining` flag prints the number of AI credits left this month as a bare value (no labels or units) and exits. It cannot be combined with `--output`.
 - The TUI can now be quit with `Ctrl+C` in addition to `q`.
 
 ### Changed

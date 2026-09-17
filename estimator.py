@@ -592,10 +592,18 @@ def output_json(model_rows: list[tuple[str, dict]], total_credits: float, budget
         "budget": budget,
         "total_credits": round(total_credits, 4),
         "pct_of_budget": round(total_credits / budget * 100, 2) if budget else None,
+        "remaining_credits": round(budget - total_credits, 4),
+        "pct_remaining": round((budget - total_credits) / budget * 100, 2) if budget else None,
+        "days_until_reset": days_until_budget_reset(),
         "models": rows,
         "pricing_source": PRICING_META.get("source"),
         "pricing_retrieved_at": PRICING_META.get("retrieved_at"),
     }, indent=2))
+
+
+def output_remaining(total_credits: float, budget: float) -> None:
+    """Print the AI credits left this month as a bare number."""
+    print(f"{budget - total_credits:.1f}")
 
 
 def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budget: float) -> None:
@@ -621,6 +629,11 @@ def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budge
     print(f"{'TOTAL':<26} {'':>6} {'':>12} {'':>10} {'':>10} {'':>10} "
           f"{total_credits:>10,.1f} {'100.0%':>8} {pct_budget_total:>9.2f}%")
     print(f"\nBudget: {budget:,.0f} AI credits")
+    remaining = budget - total_credits
+    pct_remaining = f" ({remaining / budget * 100:.1f}%)" if budget else ""
+    days = days_until_budget_reset()
+    reset = "resets tomorrow" if days == 1 else f"resets in {days} days"
+    print(f"Remaining: {remaining:,.1f} AI credits{pct_remaining} — budget {reset}")
     retrieved_at = PRICING_META.get("retrieved_at")
     if retrieved_at:
         print(f"Pricing last refreshed: {retrieved_at}")
@@ -648,20 +661,29 @@ def main() -> None:
                     help=f"Terminal height threshold below which compact mode activates (default {COMPACT_HEIGHT})")
     ap.add_argument("--output", choices=["json", "table"], default=None,
                     help="Print monthly data in the given format and exit (no TUI)")
+    ap.add_argument("--remaining", action="store_true",
+                    help="Print the number of AI credits left this month and exit "
+                         "(cannot be combined with --output)")
     ap.add_argument("--offline", action="store_true",
                     help="Never fetch pricing over the network; use cached/bundled pricing only")
     args = ap.parse_args()
+
+    if args.remaining and args.output:
+        ap.error("--remaining cannot be combined with --output; "
+                 "use --output json, which already reports remaining_credits")
 
     global PRICING, PRICING_META
     if not args.offline:
         PRICING, PRICING_META = pricing_source.load_pricing(refresh=True)
 
-    if args.output:
+    if args.output or args.remaining:
         start_ms, end_ms = range_bounds("month")
         rows = fetch_rows(args.db, start_ms, end_ms)
         model_rows = summarize_by_model(rows)
         total = sum(credits(m["usd"]) for _, m in model_rows if m["priced"])
-        if args.output == "json":
+        if args.remaining:
+            output_remaining(total, args.budget)
+        elif args.output == "json":
             output_json(model_rows, total, args.budget)
         else:
             output_table(model_rows, total, args.budget)
