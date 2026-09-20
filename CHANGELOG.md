@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `--week`, `--day`, and `--hour` selectors for ISO and recent bare-number time ranges in the TUI, table, JSON, session, and prompt output modes.
 - Selected week, day, and hour ranges now replace the corresponding TUI tab label with the exact selected period.
 - TUI tabs now derive their selected hour, day, week, and month from any supplied time selector.
+- Added TUI navigation and live refresh controls for browsing selected time ranges.
 
 ## [0.4.0] - 2026-09-17
 

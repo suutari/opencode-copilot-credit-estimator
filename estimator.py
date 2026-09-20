@@ -760,8 +760,10 @@ class CreditEstimatorApp(App):
         Binding("q", "quit", "Quit"),
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
         Binding("r", "refresh", "Refresh now"),
-        Binding("1", "switch_tab('hour')", "Last hour"),
-        Binding("2", "switch_tab('today')", "Today"),
+        Binding("up,n", "next_period", "Next", key_display="↑/n"),
+        Binding("down,p", "previous_period", "Previous", key_display="↓/p"),
+        Binding("1", "switch_tab('hour')", "Hour"),
+        Binding("2", "switch_tab('today')", "Day"),
         Binding("3", "switch_tab('week')", "Week"),
         Binding("4", "switch_tab('month')", "Month"),
     ]
@@ -793,6 +795,8 @@ class CreditEstimatorApp(App):
                 Binding("q", "quit", "Quit"),
                 Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
                 Binding("r", "refresh", "Refresh now"),
+                Binding("up,n", "next_period", "Next", key_display="↑/n"),
+                Binding("down,p", "previous_period", "Previous", key_display="↓/p"),
                 Binding("1", "switch_tab('hour')", "Hour"),
                 Binding("2", "switch_tab('today')", "Day"),
                 Binding("3", "switch_tab('week')", "Week"),
@@ -879,7 +883,60 @@ class CreditEstimatorApp(App):
         self.query_one("#range-tabs", Tabs).active = key
 
     def action_refresh(self) -> None:
-        self.refresh_data()
+        self.selected_range = None
+        self.selected_ranges = {}
+        self.month = None
+        if self._screen_stack:
+            self._update_tab_labels(self.compact)
+            self.refresh_data()
+
+    def action_next_period(self) -> None:
+        self._move_period(1)
+
+    def action_previous_period(self) -> None:
+        self._move_period(-1)
+
+    def _move_period(self, direction: int) -> None:
+        """Move the active period and derive all other tabs from it."""
+        range_key = self.active_range
+        selector_kind = {"hour": "hour", "today": "day", "week": "week", "month": "month"}[range_key]
+        current = _local_now()
+        selected = self.selected_ranges.get(range_key)
+        if selected is None:
+            if range_key == "hour":
+                anchor = current.replace(minute=0, second=0, microsecond=0)
+            elif range_key == "today":
+                anchor = current.date()
+            elif range_key == "week":
+                anchor = current.date() - timedelta(days=current.weekday())
+            else:
+                anchor = current.date().replace(day=1)
+        elif range_key == "hour":
+            anchor = selected.start + timedelta(hours=direction)
+        elif range_key == "today":
+            anchor = selected.start.date() + timedelta(days=direction)
+        elif range_key == "week":
+            anchor = selected.start.date() + timedelta(days=7 * direction)
+        else:
+            month = selected.start.date()
+            month_index = month.year * 12 + month.month - 1 + direction
+            anchor = date(month_index // 12, month_index % 12 + 1, 1)
+        if selected is None:
+            if selector_kind == "hour":
+                anchor += timedelta(hours=direction)
+            elif selector_kind == "day":
+                anchor += timedelta(days=direction)
+            elif selector_kind == "week":
+                anchor += timedelta(days=7 * direction)
+            else:
+                month_index = anchor.year * 12 + anchor.month - 1 + direction
+                anchor = date(month_index // 12, month_index % 12 + 1, 1)
+        self.selected_ranges = derived_time_ranges(selector_kind, anchor, current)
+        self.selected_range = self.selected_ranges[range_key]
+        self.initial_tab = range_key
+        if self._screen_stack:
+            self._update_tab_labels(self.compact)
+            self.refresh_data()
 
     def refresh_data(self) -> None:
         range_key = self.active_range

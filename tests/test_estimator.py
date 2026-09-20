@@ -267,8 +267,59 @@ def test_time_selector_uses_generic_help_labels():
 def test_current_time_uses_current_help_labels():
     app = make_app()
     labels = {binding.key: binding.description for binding in app.BINDINGS}
-    assert labels["1"] == "Last hour"
-    assert labels["2"] == "Today"
+    assert labels["1"] == "Hour"
+    assert labels["2"] == "Day"
+
+
+def test_navigation_help_bindings_are_available():
+    app = make_app()
+    bindings = {binding.action: binding for binding in app.BINDINGS}
+    assert bindings["next_period"].description == "Next"
+    assert bindings["next_period"].key == "up,n"
+    assert bindings["next_period"].key_display == "↑/n"
+    assert bindings["previous_period"].description == "Previous"
+    assert bindings["previous_period"].key == "down,p"
+    assert bindings["previous_period"].key_display == "↓/p"
+
+
+def test_navigation_moves_all_ranges_from_active_day():
+    app = CreditEstimatorApp(
+        db="/nonexistent/opencode.db",
+        budget=50_000,
+        interval=3600,
+        selected_ranges=estimator.derived_time_ranges(
+            "day", date(2026, 9, 10), datetime(2026, 9, 20, 22, tzinfo=timezone.utc)
+        ),
+        initial_tab="today",
+    )
+    app.active_range = "today"
+    app._move_period(1)
+    assert app.selected_ranges["today"].label == "2026-09-11"
+    assert app.selected_ranges["hour"].label == "2026-09-11T12"
+    assert app.selected_ranges["week"].label == "2026-W37"
+    assert app.selected_ranges["month"].label == "2026-09"
+
+
+def test_refresh_returns_to_live_mode():
+    app = CreditEstimatorApp(
+        db="/nonexistent/opencode.db",
+        budget=50_000,
+        interval=15,
+        month=date(2024, 2, 1),
+        selected_range=estimator.TimeRange(
+            datetime(2024, 2, 15, tzinfo=timezone.utc),
+            datetime(2024, 2, 16, tzinfo=timezone.utc),
+            "2024-02-15",
+        ),
+        selected_ranges=estimator.derived_time_ranges(
+            "day", date(2024, 2, 15), datetime(2024, 2, 20, 12, tzinfo=timezone.utc)
+        ),
+        initial_tab="today",
+    )
+    app.action_refresh()
+    assert app.selected_range is None
+    assert app.selected_ranges == {}
+    assert app.month is None
 
 
 def test_filter_session_rows():
