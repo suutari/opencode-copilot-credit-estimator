@@ -1,6 +1,6 @@
 """Headless Textual tests for the responsive compact layout."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -108,6 +108,53 @@ async def test_zero_budget_state():
         assert "/ 0 credits used" in str(summary.content)
 
 
+def test_parse_month_accepts_year_month():
+    assert estimator.parse_month("2024-02") == date(2024, 2, 1)
+
+
+def test_parse_month_rejects_invalid_values():
+    with pytest.raises(estimator.argparse.ArgumentTypeError):
+        estimator.parse_month("2024-2")
+    with pytest.raises(estimator.argparse.ArgumentTypeError):
+        estimator.parse_month("2024-13")
+
+
+def test_month_bounds_handles_leap_year():
+    start, end = estimator.month_bounds(date(2024, 2, 1))
+    assert start == datetime(2024, 2, 1, tzinfo=timezone.utc)
+    assert end == datetime(2024, 3, 1, tzinfo=timezone.utc)
+
+
+def test_range_bounds_for_historical_month():
+    start_ms, end_ms = estimator.range_bounds("month", date(2024, 2, 1))
+    assert start_ms == int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    assert end_ms == int(datetime(2024, 3, 1, tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def test_output_json_reports_selected_month(capsys):
+    import json
+
+    estimator.output_json([], 0.0, 50_000.0, date(2024, 2, 1))
+    data = json.loads(capsys.readouterr().out)
+    assert data["period"] == "2024-02"
+    assert data["days_until_reset"] is None
+
+
+# --- Selected month ---------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_selected_month_is_shown_on_month_tab():
+    app = CreditEstimatorApp(
+        db="/nonexistent/opencode.db",
+        budget=50_000,
+        interval=3600,
+        month=date(2024, 2, 1),
+    )
+    async with app.run_test(size=(160, 50)):
+        tab = app.query_one("#month")
+        assert str(tab.label) == "2024-02"
+
+
 # --- --remaining / JSON output ---------------------------------------------
 
 def test_output_remaining_is_bare_number(capsys):
@@ -207,11 +254,23 @@ def test_summarize_by_session_groups_requests(monkeypatch):
 
 def test_output_sessions_shows_session_breakdown(monkeypatch, capsys):
     monkeypatch.setattr(estimator, "PRICING_META", {})
-    rows = [("session-a", {
-        "title": "A task", "requests": 2, "input": 1_000, "output": 500,
-        "cache_read": 0, "cache_write": 0, "first_ts_ms": 100,
-        "last_ts_ms": 200, "usd": 1.25, "priced": True,
-    })]
+    rows = [
+        (
+            "session-a",
+            {
+                "title": "A task",
+                "requests": 2,
+                "input": 1_000,
+                "output": 500,
+                "cache_read": 0,
+                "cache_write": 0,
+                "first_ts_ms": 100,
+                "last_ts_ms": 200,
+                "usd": 1.25,
+                "priced": True,
+            },
+        )
+    ]
 
     estimator.output_sessions_table(rows, 125.0, 50_000.0)
     out = capsys.readouterr().out
@@ -226,11 +285,23 @@ def test_output_sessions_json_includes_sessions(monkeypatch, capsys):
     import json
 
     monkeypatch.setattr(estimator, "PRICING_META", {})
-    rows = [("session-a", {
-        "title": "A task", "requests": 1, "input": 10, "output": 5,
-        "cache_read": 0, "cache_write": 0, "first_ts_ms": 100,
-        "last_ts_ms": 100, "usd": 0.01, "priced": True,
-    })]
+    rows = [
+        (
+            "session-a",
+            {
+                "title": "A task",
+                "requests": 1,
+                "input": 10,
+                "output": 5,
+                "cache_read": 0,
+                "cache_write": 0,
+                "first_ts_ms": 100,
+                "last_ts_ms": 100,
+                "usd": 0.01,
+                "priced": True,
+            },
+        )
+    ]
 
     estimator.output_sessions_json(rows, 1.0, 50_000.0)
     data = json.loads(capsys.readouterr().out)

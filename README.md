@@ -50,6 +50,9 @@ occe
 # Set a custom monthly budget
 occe --budget 30000
 
+# Estimate a specific calendar month
+occe --month 2026-08 --output table
+
 # Point to a non-default database location
 occe --db /path/to/opencode.db
 
@@ -72,16 +75,21 @@ occe --output table
 occe --output json
 
 # Per-session table
-occe --sessions
+occe --month 2026-08 --sessions
 
 # Per-session JSON
-occe --sessions --output json
+occe --month 2026-08 --sessions --output json
 ```
 
-The `--sessions` flag groups the current month's requests by OpenCode session
+The `--sessions` flag groups the selected month's requests by OpenCode session
 and reports each session's title, request count, token totals, and estimated
 AI credits. Use `--output table` (the default) or `--output json` to select the
 rendering format.
+
+Use `--month YYYY-MM` to select a calendar month for the TUI, table, JSON, or
+session report. It defaults to the current month. In the TUI, the selected
+month applies to the **This month** tab; the other tabs continue to show their
+rolling/current time ranges.
 
 ### Remaining budget
 
@@ -105,6 +113,7 @@ occe --remaining
 | Flag | Default | Description |
 |---|---|---|
 | `--budget` | `50000` | Monthly AI credit budget to compare against |
+| `--month` | current month | Calendar month to estimate in `YYYY-MM` format |
 | `--db` | `~/.local/share/opencode/opencode.db` | Path to the opencode SQLite database |
 | `--interval` | `30` | Auto-refresh interval in seconds (TUI only) |
 | `--compact-width` | `80` | Terminal width (columns) below which compact mode activates |

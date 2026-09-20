@@ -23,8 +23,9 @@ Usage:
 import argparse
 import calendar
 import os
+import re
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from itertools import accumulate
 
 from textual import events, on
@@ -58,7 +59,43 @@ PRICING, PRICING_META = pricing_source.load_pricing(refresh=False)
 # Data layer
 # ---------------------------------------------------------------------------
 
-def range_bounds(range_key: str) -> tuple[int, int]:
+def parse_month(value: str) -> date:
+    """Parse a YYYY-MM month selector into its first day."""
+    if not re.fullmatch(r"\d{4}-\d{2}", value):
+        raise argparse.ArgumentTypeError("month must use YYYY-MM format")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m").date()
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("month must use YYYY-MM format") from exc
+    return parsed.replace(day=1)
+
+
+def month_bounds(month: date | None = None) -> tuple[datetime, datetime]:
+    """Return UTC start and exclusive end datetimes for a calendar month."""
+    if month is None:
+        now = datetime.now(timezone.utc)
+        month = now.date().replace(day=1)
+    start = datetime(month.year, month.month, 1, tzinfo=timezone.utc)
+    if month.month == 12:
+        end = datetime(month.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        end = datetime(month.year, month.month + 1, 1, tzinfo=timezone.utc)
+    return start, end
+
+
+def month_label(month: date | None = None) -> str:
+    """Return the selected month as YYYY-MM for output labels."""
+    if month is None:
+        month = datetime.now(timezone.utc).date()
+    return month.strftime("%Y-%m")
+
+
+def is_current_month(month: date | None) -> bool:
+    now = datetime.now(timezone.utc).date()
+    return month is None or (month.year == now.year and month.month == now.month)
+
+
+def range_bounds(range_key: str, month: date | None = None) -> tuple[int, int]:
     """Return (start_ms, end_ms) UTC for the given range key."""
     now = datetime.now(timezone.utc)
     if range_key == "hour":
@@ -70,7 +107,10 @@ def range_bounds(range_key: str) -> tuple[int, int]:
             hour=0, minute=0, second=0, microsecond=0
         )
     elif range_key == "month":
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start, end = month_bounds(month)
+        if end > now:
+            end = now
+        return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
     else:
         raise ValueError(f"Unknown range: {range_key}")
     end = now
@@ -142,7 +182,7 @@ def days_until_budget_reset(now: datetime | None = None) -> int:
 
 
 def build_series(
-    rows: list[dict], range_key: str
+    rows: list[dict], range_key: str, month: date | None = None
 ) -> tuple[list[str], list[float]]:
     """
     Bucket rows into time slots and return (x_labels, cumulative_credits).
@@ -196,12 +236,18 @@ def build_series(
                 return day_names[dt.weekday()]
             return ""
     else:  # month
-        # Daily buckets from 1st to today
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        n_buckets = now.day
+        # Daily buckets from the first through the last selected month day.
+        start, month_end = month_bounds(month)
+        end = min(month_end, now)
+        n_buckets = (
+            now.date().day
+            if end < month_end
+            else (month_end.date() - start.date()).days
+        )
+        n_buckets = max(n_buckets, 1)
         def bucket_fn(ts_ms):
             dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
-            return dt.day - 1
+            return (dt.date() - start.date()).days
         def label_fn(i):
             return str(i + 1)
 
@@ -450,14 +496,17 @@ class UsageSummary(Label):
     terminal size or compact/regular mode.
     """
 
-    def update_summary(self, total: float, budget: float) -> None:
+    def update_summary(self, total: float, budget: float, month: date | None = None) -> None:
         pct = (total / budget * 100) if budget else 0.0
-        days = days_until_budget_reset()
-        reset_line = (
-            "Budget resets tomorrow"
-            if days == 1
-            else f"Budget resets in {days} days"
-        )
+        if is_current_month(month):
+            days = days_until_budget_reset()
+            reset_line = (
+                "Budget resets tomorrow"
+                if days == 1
+                else f"Budget resets in {days} days"
+            )
+        else:
+            reset_line = "Historical month"
         self.update(
             f"{total:,.1f} / {budget:,.0f} credits used  ({pct:.1f}% of budget)\n"
             f"{reset_line}"
@@ -497,7 +546,7 @@ class CreditEstimatorApp(App):
 
     def __init__(self, db: str, budget: float, interval: int,
                  compact_width: int = COMPACT_WIDTH, compact_height: int = COMPACT_HEIGHT,
-                 offline: bool = False):
+                 offline: bool = False, month: date | None = None):
         super().__init__()
         self.db = db
         self.budget = budget
@@ -505,6 +554,7 @@ class CreditEstimatorApp(App):
         self.compact_width = compact_width
         self.compact_height = compact_height
         self.offline = offline
+        self.month = month
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -565,6 +615,9 @@ class CreditEstimatorApp(App):
                 tab = tabs.query_one(f"#{key}", Tab)
             except Exception:
                 continue
+            if key == "month" and self.month is not None:
+                full_label = month_label(self.month)
+                short_label = full_label
             tab.label = short_label if compact else full_label
 
     @on(Tabs.TabActivated, "#range-tabs")
@@ -582,11 +635,13 @@ class CreditEstimatorApp(App):
     def refresh_data(self) -> None:
         range_key = self.active_range
         range_label = {key: label for key, label, _ in RANGES}[range_key]
+        if range_key == "month" and self.month is not None:
+            range_label = f"{range_label} ({month_label(self.month)})"
 
-        start_ms, end_ms = range_bounds(range_key)
+        start_ms, end_ms = range_bounds(range_key, self.month)
         rows = fetch_rows(self.db, start_ms, end_ms)
 
-        labels, cumulative = build_series(rows, range_key)
+        labels, cumulative = build_series(rows, range_key, self.month)
         model_rows = summarize_by_model(rows)
         total = cumulative[-1] if cumulative else 0.0
 
@@ -597,7 +652,7 @@ class CreditEstimatorApp(App):
         table.update_data(model_rows, total, self.budget)
 
         summary = self.query_one("#summary", UsageSummary)
-        summary.update_summary(total, self.budget)
+        summary.update_summary(total, self.budget, self.month)
 
         self._update_status()
 
@@ -641,7 +696,8 @@ def session_output_rows(
     return rows
 
 
-def output_json(model_rows: list[tuple[str, dict]], total_credits: float, budget: float) -> None:
+def output_json(model_rows: list[tuple[str, dict]], total_credits: float, budget: float,
+                month: date | None = None) -> None:
     import json as _json
     rows = []
     for model, m in model_rows:
@@ -658,13 +714,13 @@ def output_json(model_rows: list[tuple[str, dict]], total_credits: float, budget
             "pct_of_budget": round(cred_val / budget * 100, 4) if (m["priced"] and budget) else None,
         })
     print(_json.dumps({
-        "period": "month",
+        "period": month_label(month),
         "budget": budget,
         "total_credits": round(total_credits, 4),
         "pct_of_budget": round(total_credits / budget * 100, 2) if budget else None,
         "remaining_credits": round(budget - total_credits, 4),
         "pct_remaining": round((budget - total_credits) / budget * 100, 2) if budget else None,
-        "days_until_reset": days_until_budget_reset(),
+        "days_until_reset": days_until_budget_reset() if is_current_month(month) else None,
         "models": rows,
         "pricing_source": PRICING_META.get("source"),
         "pricing_retrieved_at": PRICING_META.get("retrieved_at"),
@@ -676,13 +732,14 @@ def output_remaining(total_credits: float, budget: float) -> None:
     print(f"{budget - total_credits:.1f}")
 
 
-def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budget: float) -> None:
+def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budget: float,
+                 month: date | None = None) -> None:
     pct_budget_total = total_credits / budget * 100 if budget else 0
     header = (
         f"{'Model':<26} {'Reqs':>6} {'Input':>12} {'Output':>10} "
         f"{'Cache R':>10} {'Cache W':>10} {'Credits':>10} {'% used':>8} {'% budget':>10}"
     )
-    print(f"\nOpencode -> GitHub Copilot AI credit estimate (this month)")
+    print(f"\nOpencode -> GitHub Copilot AI credit estimate ({month_label(month)})")
     print("=" * len(header))
     print(header)
     print("-" * len(header))
@@ -701,9 +758,13 @@ def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budge
     print(f"\nBudget: {budget:,.0f} AI credits")
     remaining = budget - total_credits
     pct_remaining = f" ({remaining / budget * 100:.1f}%)" if budget else ""
-    days = days_until_budget_reset()
-    reset = "resets tomorrow" if days == 1 else f"resets in {days} days"
-    print(f"Remaining: {remaining:,.1f} AI credits{pct_remaining} — budget {reset}")
+    if is_current_month(month):
+        days = days_until_budget_reset()
+        reset = "resets tomorrow" if days == 1 else f"resets in {days} days"
+        reset_suffix = f" — budget {reset}"
+    else:
+        reset_suffix = " — historical month"
+    print(f"Remaining: {remaining:,.1f} AI credits{pct_remaining}{reset_suffix}")
     retrieved_at = PRICING_META.get("retrieved_at")
     if retrieved_at:
         print(f"Pricing last refreshed: {retrieved_at}")
@@ -711,14 +772,15 @@ def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budge
 
 
 def output_sessions_table(
-    session_rows: list[tuple[str, dict]], total_credits: float, budget: float
+    session_rows: list[tuple[str, dict]], total_credits: float, budget: float,
+    month: date | None = None,
 ) -> None:
     """Print the current month's estimated credits grouped by OpenCode session."""
     header = (
         f"{'Session':<36} {'Reqs':>6} {'Input':>12} {'Output':>10} "
         f"{'Cache R':>10} {'Cache W':>10} {'Credits':>10} {'% used':>8} {'% budget':>10}"
     )
-    print("\nOpencode -> GitHub Copilot AI credit estimate by session (this month)")
+    print(f"\nOpencode -> GitHub Copilot AI credit estimate by session ({month_label(month)})")
     print("=" * len(header))
     print(header)
     print("-" * len(header))
@@ -761,18 +823,19 @@ def output_sessions_table(
 
 
 def output_sessions_json(
-    session_rows: list[tuple[str, dict]], total_credits: float, budget: float
+    session_rows: list[tuple[str, dict]], total_credits: float, budget: float,
+    month: date | None = None,
 ) -> None:
     import json as _json
     print(_json.dumps({
-        "period": "month",
+        "period": month_label(month),
         "budget": budget,
         "total_credits": round(total_credits, 4),
         "pct_of_budget": round(total_credits / budget * 100, 2) if budget else None,
         "remaining_credits": round(budget - total_credits, 4),
         "pct_remaining": round((budget - total_credits) / budget * 100, 2)
         if budget else None,
-        "days_until_reset": days_until_budget_reset(),
+        "days_until_reset": days_until_budget_reset() if is_current_month(month) else None,
         "sessions": session_output_rows(session_rows, total_credits, budget),
         "pricing_source": PRICING_META.get("source"),
         "pricing_retrieved_at": PRICING_META.get("retrieved_at"),
@@ -789,7 +852,9 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--budget", type=float, default=DEFAULT_BUDGET,
-                    help=f"Monthly AI credit budget (default {DEFAULT_BUDGET:,})")
+                     help=f"Monthly AI credit budget (default {DEFAULT_BUDGET:,})")
+    ap.add_argument("--month", type=parse_month,
+                    help="Calendar month to estimate in YYYY-MM format (default: current month)")
     ap.add_argument("--db", default=DEFAULT_DB,
                     help="Path to opencode's SQLite database")
     ap.add_argument("--interval", type=int, default=DEFAULT_INTERVAL,
@@ -818,7 +883,7 @@ def main() -> None:
         PRICING, PRICING_META = pricing_source.load_pricing(refresh=True)
 
     if args.output or args.remaining or args.sessions:
-        start_ms, end_ms = range_bounds("month")
+        start_ms, end_ms = range_bounds("month", args.month)
         rows = fetch_rows(args.db, start_ms, end_ms)
         model_rows = summarize_by_model(rows)
         session_rows = summarize_by_session(rows)
@@ -826,18 +891,18 @@ def main() -> None:
         if args.remaining:
             output_remaining(total, args.budget)
         elif args.sessions and args.output == "json":
-            output_sessions_json(session_rows, total, args.budget)
+            output_sessions_json(session_rows, total, args.budget, args.month)
         elif args.sessions:
-            output_sessions_table(session_rows, total, args.budget)
+            output_sessions_table(session_rows, total, args.budget, args.month)
         elif args.output == "json":
-            output_json(model_rows, total, args.budget)
+            output_json(model_rows, total, args.budget, args.month)
         else:
-            output_table(model_rows, total, args.budget)
+            output_table(model_rows, total, args.budget, args.month)
         return
 
     app = CreditEstimatorApp(db=args.db, budget=args.budget, interval=args.interval,
                              compact_width=args.compact_width, compact_height=args.compact_height,
-                             offline=args.offline)
+                             offline=args.offline, month=args.month)
     app.run()
 
 
