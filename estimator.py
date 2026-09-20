@@ -426,18 +426,16 @@ def build_series(
             return dt.strftime("%H:%M") if i % 10 == 0 else ""
     elif range_key == "today":
         # Hourly buckets from midnight to now
-        start = (time_range.start.astimezone(timezone.utc) if time_range
-                 else now.replace(hour=0, minute=0, second=0, microsecond=0))
-        end = time_range.end.astimezone(timezone.utc) if time_range else now
+        start = (time_range.start.astimezone(local_tz) if time_range
+                 else now.astimezone(local_tz).replace(
+                     hour=0, minute=0, second=0, microsecond=0))
+        end = time_range.end.astimezone(local_tz) if time_range else now.astimezone(local_tz)
         n_buckets = max(int((end - start).total_seconds() / 3600) + 1, 1)
         def bucket_fn(ts_ms):
-            dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+            dt = datetime.fromtimestamp(ts_ms / 1000, tz=local_tz)
             return int((dt - start).total_seconds() / 3600)
-        utc_offset_hours = int(now_local.utcoffset().total_seconds() // 3600)  # type: ignore[union-attr]
         def label_fn(i):
-            # Offset bucket index by local UTC offset so labels show local hours
-            local_hour = (i + utc_offset_hours) % 24
-            return f"{local_hour:02d}:00"
+            return (start + timedelta(hours=i)).strftime("%H:%M")
     elif range_key == "week":
         # Hourly buckets from Monday 00:00 to now
         start = (time_range.start.astimezone(timezone.utc) if time_range else

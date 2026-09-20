@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added TUI navigation and live refresh controls for browsing selected time ranges.
 - Added `S`/`M` TUI bindings to switch between session and model breakdowns.
 
+### Fixed
+
+- Fixed the Today chart timeline to start at local midnight and use local-time labels.
+
 ## [0.4.0] - 2026-09-17
 
 ### Added

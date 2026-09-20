@@ -1,6 +1,6 @@
 """Headless Textual tests for the responsive compact layout."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -146,6 +146,29 @@ def test_selected_time_range_has_timestamp_bounds():
     assert period.start.replace(tzinfo=None) == datetime(2026, 9, 20)
     assert period.end == now
     assert period.label == "2026-09-20"
+
+
+def test_today_series_starts_at_local_midnight(monkeypatch):
+    local_tz = timezone(timedelta(hours=3))
+    now = datetime(2026, 9, 20, 5, 30, tzinfo=local_tz)
+    period = estimator.TimeRange(
+        datetime(2026, 9, 20, 0, 0, tzinfo=local_tz), now, "2026-09-20"
+    )
+    timestamp = int(datetime(2026, 9, 20, 3, 15, tzinfo=local_tz).timestamp() * 1000)
+    rows = [{
+        "ts_ms": timestamp,
+        "model": "test-model",
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+    }]
+    monkeypatch.setattr(estimator, "PRICING", {"test-model": (1.0, 0.0, None, 1.0)})
+    labels, values = estimator.build_series(rows, "today", time_range=period)
+    assert labels[0] == "00:00"
+    assert labels[3] == "03:00"
+    assert values[3] == 0.0
 
 
 def test_derived_ranges_follow_hour_anchor():
