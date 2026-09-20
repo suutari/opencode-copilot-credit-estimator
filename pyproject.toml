@@ -10,6 +10,19 @@ dependencies = [
     "textual-plotext>=1.0.1",
 ]
 
+[project.scripts]
+occe = "estimator:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["estimator", "pricing"]
+
+[tool.uv]
+package = true
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",

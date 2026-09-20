@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added the `occe` console script so the installed CLI is available when the project virtual environment is active.
+
 ## [0.4.0] - 2026-09-17
 
 ### Added
