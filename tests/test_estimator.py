@@ -155,6 +155,16 @@ async def test_selected_month_is_shown_on_month_tab():
         assert str(tab.label) == "2024-02"
 
 
+def test_filter_session_rows():
+    rows = [
+        {"session_id": "session-a", "value": 1},
+        {"session_id": "session-b", "value": 2},
+    ]
+
+    assert estimator.filter_session_rows(rows, "session-a") == [rows[0]]
+    assert estimator.filter_session_rows(rows, None) == rows
+
+
 # --- --remaining / JSON output ---------------------------------------------
 
 def test_output_remaining_is_bare_number(capsys):

@@ -154,6 +154,13 @@ def fetch_rows(db_path: str, start_ms: int, end_ms: int) -> list[dict]:
     return rows
 
 
+def filter_session_rows(rows: list[dict], session_id: str | None) -> list[dict]:
+    """Limit rows to one OpenCode session when a session was selected."""
+    if session_id is None:
+        return rows
+    return [row for row in rows if row.get("session_id") == session_id]
+
+
 def cost_usd(model: str, inp: int, out: int, reasoning: int, cr: int, cw: int) -> float:
     if model not in PRICING:
         return 0.0
@@ -546,7 +553,8 @@ class CreditEstimatorApp(App):
 
     def __init__(self, db: str, budget: float, interval: int,
                  compact_width: int = COMPACT_WIDTH, compact_height: int = COMPACT_HEIGHT,
-                 offline: bool = False, month: date | None = None):
+                 offline: bool = False, month: date | None = None,
+                 session_id: str | None = None):
         super().__init__()
         self.db = db
         self.budget = budget
@@ -555,6 +563,7 @@ class CreditEstimatorApp(App):
         self.compact_height = compact_height
         self.offline = offline
         self.month = month
+        self.session_id = session_id
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -639,7 +648,7 @@ class CreditEstimatorApp(App):
             range_label = f"{range_label} ({month_label(self.month)})"
 
         start_ms, end_ms = range_bounds(range_key, self.month)
-        rows = fetch_rows(self.db, start_ms, end_ms)
+        rows = filter_session_rows(fetch_rows(self.db, start_ms, end_ms), self.session_id)
 
         labels, cumulative = build_series(rows, range_key, self.month)
         model_rows = summarize_by_model(rows)
@@ -866,7 +875,9 @@ def main() -> None:
     ap.add_argument("--output", choices=["json", "table"], default=None,
                      help="Print monthly data in the given format and exit (no TUI)")
     ap.add_argument("--sessions", action="store_true",
-                    help="Report monthly data grouped by OpenCode session (no TUI)")
+                     help="Report monthly data grouped by OpenCode session (no TUI)")
+    ap.add_argument("--session", dest="session_id",
+                    help="Limit data to one OpenCode session ID")
     ap.add_argument("--remaining", action="store_true",
                     help="Print the number of AI credits left this month and exit "
                          "(cannot be combined with --output)")
@@ -874,8 +885,8 @@ def main() -> None:
                     help="Never fetch pricing over the network; use cached/bundled pricing only")
     args = ap.parse_args()
 
-    if args.remaining and (args.output or args.sessions):
-        ap.error("--remaining cannot be combined with --output or --sessions; "
+    if args.remaining and (args.output or args.sessions or args.session_id):
+        ap.error("--remaining cannot be combined with --output, --sessions, or --session; "
                  "use --output json, which already reports remaining_credits")
 
     global PRICING, PRICING_META
@@ -884,7 +895,9 @@ def main() -> None:
 
     if args.output or args.remaining or args.sessions:
         start_ms, end_ms = range_bounds("month", args.month)
-        rows = fetch_rows(args.db, start_ms, end_ms)
+        rows = filter_session_rows(
+            fetch_rows(args.db, start_ms, end_ms), args.session_id
+        )
         model_rows = summarize_by_model(rows)
         session_rows = summarize_by_session(rows)
         total = sum(credits(m["usd"]) for _, m in model_rows if m["priced"])
@@ -902,7 +915,8 @@ def main() -> None:
 
     app = CreditEstimatorApp(db=args.db, budget=args.budget, interval=args.interval,
                              compact_width=args.compact_width, compact_height=args.compact_height,
-                             offline=args.offline, month=args.month)
+                             offline=args.offline, month=args.month,
+                             session_id=args.session_id)
     app.run()
 
 

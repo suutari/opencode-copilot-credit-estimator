@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added the `occe` console script so the installed CLI is available when the project virtual environment is active.
 - Added `--sessions` to report estimated AI credit consumption grouped by OpenCode session. Use it with `--output table` or `--output json`.
 - Added `--month YYYY-MM` to estimate a specific calendar month in the TUI and all non-interactive output modes.
+- Added `--session SESSION_ID` to filter the TUI and non-interactive output to one OpenCode session.
 
 ## [0.4.0] - 2026-09-17
 

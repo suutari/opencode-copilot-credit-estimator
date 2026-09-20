@@ -79,6 +79,10 @@ occe --month 2026-08 --sessions
 
 # Per-session JSON
 occe --month 2026-08 --sessions --output json
+
+# Filter any TUI or report to one session
+occe --session ses_abc123 --month 2026-08
+occe --session ses_abc123 --output json
 ```
 
 The `--sessions` flag groups the selected month's requests by OpenCode session
@@ -90,6 +94,11 @@ Use `--month YYYY-MM` to select a calendar month for the TUI, table, JSON, or
 session report. It defaults to the current month. In the TUI, the selected
 month applies to the **This month** tab; the other tabs continue to show their
 rolling/current time ranges.
+
+Use `--session SESSION_ID` to limit the TUI or any non-interactive output to a
+single OpenCode session. This can be combined with `--month` to inspect that
+session's daily credit growth over a selected month, or with `--sessions` to
+produce a one-session breakdown.
 
 ### Remaining budget
 
@@ -120,6 +129,7 @@ occe --remaining
 | `--compact-height` | `30` | Terminal height (rows) below which compact mode activates |
 | `--output` | — | Print monthly data as `table` or `json` and exit |
 | `--sessions` | off | Group non-interactive output by OpenCode session instead of model |
+| `--session` | — | Limit the TUI or non-interactive output to one OpenCode session ID |
 | `--remaining` | off | Print the number of AI credits left this month and exit (not combinable with `--output`) |
 | `--offline` | off | Skip network pricing refresh; use cached/bundled pricing only |
 
