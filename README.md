@@ -83,6 +83,11 @@ occe --month 2026-08 --sessions --output json
 # Filter any TUI or report to one session
 occe --session ses_abc123 --month 2026-08
 occe --session ses_abc123 --output json
+
+# Show prompts from one session
+occe --session ses_abc123 --prompts
+occe --session ses_abc123 --prompts=long
+occe --session ses_abc123 --prompts=full --output json
 ```
 
 The `--sessions` flag groups the selected month's requests by OpenCode session
@@ -99,6 +104,12 @@ Use `--session SESSION_ID` to limit the TUI or any non-interactive output to a
 single OpenCode session. This can be combined with `--month` to inspect that
 session's daily credit growth over a selected month, or with `--sessions` to
 produce a one-session breakdown.
+
+Use `--prompts` with `--session SESSION_ID` to print the user prompts from that
+session. The default `short` mode shows the first line up to 80 characters;
+`long` shows up to 300 characters of that line, and `full` shows the complete
+prompt. In table output, short prompts share a line with their usage data;
+long and full prompts are followed by their usage data on the next line.
 
 ### Remaining budget
 
@@ -130,6 +141,7 @@ occe --remaining
 | `--output` | — | Print monthly data as `table` or `json` and exit |
 | `--sessions` | off | Group non-interactive output by OpenCode session instead of model |
 | `--session` | — | Limit the TUI or non-interactive output to one OpenCode session ID |
+| `--prompts[=MODE]` | — | Print user prompts for `--session`; mode is `short`, `long`, or `full` |
 | `--remaining` | off | Print the number of AI credits left this month and exit (not combinable with `--output`) |
 | `--offline` | off | Skip network pricing refresh; use cached/bundled pricing only |
 

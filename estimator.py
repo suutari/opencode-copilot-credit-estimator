@@ -163,6 +163,74 @@ def filter_session_rows(rows: list[dict], session_id: str | None) -> list[dict]:
     return [row for row in rows if row.get("session_id") == session_id]
 
 
+def fetch_prompts(db_path: str, session_id: str, start_ms: int, end_ms: int) -> list[dict]:
+    """Return user prompts and their metadata for one session and time range."""
+    if not os.path.exists(db_path):
+        return []
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    cur = con.cursor()
+    cur.execute(
+        """
+        SELECT
+            m.id AS message_id,
+            m.time_created AS ts_ms,
+            m.session_id AS session_id,
+            COALESCE(s.title, '') AS session_title,
+            COALESCE(p.name, p.worktree, '') AS project_name,
+            COALESCE(
+                NULLIF(GROUP_CONCAT(json_extract(pt.data, '$.text'), char(10)), ''),
+                json_extract(m.data, '$.content'),
+                ''
+            ) AS prompt
+        FROM message AS m
+        LEFT JOIN session AS s ON s.id = m.session_id
+        LEFT JOIN project AS p ON p.id = s.project_id
+        LEFT JOIN part AS pt ON pt.message_id = m.id
+            AND json_extract(pt.data, '$.type') = 'text'
+        WHERE m.session_id = ?
+          AND json_extract(m.data, '$.role') = 'user'
+          AND m.time_created >= ? AND m.time_created < ?
+        GROUP BY m.id, m.time_created, m.session_id, s.title, p.name, p.worktree
+        ORDER BY m.time_created, m.id
+        """,
+        (session_id, start_ms, end_ms),
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    con.close()
+    return rows
+
+
+def attach_prompt_usage(prompts: list[dict], rows: list[dict]) -> list[dict]:
+    """Attach assistant request, token, and credit totals to each prompt."""
+    for prompt in prompts:
+        prompt.update({
+            "requests": 0,
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+            "credits": 0.0,
+        })
+    for row in rows:
+        target = next(
+            (prompt for prompt in reversed(prompts) if prompt["ts_ms"] <= row["ts_ms"]),
+            None,
+        )
+        if target is None:
+            continue
+        target["requests"] += 1
+        target["input"] += row["input"]
+        target["output"] += row["output"] + row["reasoning"]
+        target["cache_read"] += row["cache_read"]
+        target["cache_write"] += row["cache_write"]
+        target["credits"] += credits(cost_usd(
+            row["model"] or "", row["input"], row["output"], row["reasoning"],
+            row["cache_read"], row["cache_write"],
+        ))
+    return prompts
+
+
 def cost_usd(model: str, inp: int, out: int, reasoning: int, cr: int, cw: int) -> float:
     if model not in PRICING:
         return 0.0
@@ -858,6 +926,92 @@ def output_sessions_json(
     }, indent=2))
 
 
+def prompt_preview(text: str, mode: str) -> str:
+    """Format a prompt according to the requested display mode."""
+    first_line = text.splitlines()[0] if text.splitlines() else ""
+    if mode == "short":
+        return first_line[:80]
+    if mode == "long":
+        return first_line[:300]
+    return text
+
+
+def prompt_data_line(prompt: dict) -> str:
+    return (
+        f"{prompt['requests']:,} requests  "
+        f"{prompt['input']:,} input  {prompt['output']:,} output  "
+        f"{prompt['cache_read']:,} cache read  {prompt['cache_write']:,} cache write"
+    )
+
+
+def prompt_timestamp(prompt: dict) -> str:
+    """Format a prompt timestamp in local time at minute precision."""
+    return datetime.fromtimestamp(prompt["ts_ms"] / 1000).astimezone().strftime(
+        "%Y-%m-%dT%H:%M"
+    )
+
+
+def output_prompts_table(prompts: list[dict], mode: str) -> None:
+    """Print prompts and their usage data for one session."""
+    if not prompts:
+        print("No prompts found for the selected session and period.")
+        return
+    first = prompts[0]
+    print(f"Session: {first['session_id']}")
+    print(f"Name: {first['session_title'] or 'Untitled session'}")
+    print(f"Project: {first['project_name'] or 'Unknown project'}")
+    print()
+    if mode == "short":
+        print(
+            f"{'Timestamp':<16} {'Prompt':<80} {'Reqs':>6} {'Input':>10} "
+            f"{'Output':>10} {'Cache R':>10} {'Cache W':>10} {'Credits':>10}"
+        )
+        print("-" * 156)
+    for prompt in prompts:
+        text = prompt_preview(prompt["prompt"], mode)
+        if mode == "short":
+            print(
+                f"{prompt_timestamp(prompt):<16} {text:<80} "
+                f"{prompt['requests']:>6,} {prompt['input']:>10,} "
+                f"{prompt['output']:>10,} {prompt['cache_read']:>10,} "
+                f"{prompt['cache_write']:>10,} {prompt['credits']:>10,.1f}"
+            )
+        else:
+            lines = text.splitlines() or [""]
+            print(f"{prompt_timestamp(prompt)} {lines[0]}")
+            if len(lines) > 1:
+                print("\n".join(lines[1:]))
+            if mode == "full":
+                print()
+            print(f"    {prompt_data_line(prompt)}")
+            print(f"    CREDITS: {prompt['credits']:,.1f}")
+            print()
+
+
+def output_prompts_json(prompts: list[dict], mode: str, month: date | None) -> None:
+    import json as _json
+    print(_json.dumps({
+        "period": month_label(month),
+        "session_id": prompts[0]["session_id"] if prompts else None,
+        "session_title": prompts[0]["session_title"] if prompts else None,
+        "project": prompts[0]["project_name"] if prompts else None,
+        "prompt_mode": mode,
+        "prompts": [
+            {
+                "timestamp_ms": prompt["ts_ms"],
+                "prompt": prompt_preview(prompt["prompt"], mode),
+                "requests": prompt["requests"],
+                "input_tokens": prompt["input"],
+                "output_tokens": prompt["output"],
+                "cache_read_tokens": prompt["cache_read"],
+                "cache_write_tokens": prompt["cache_write"],
+                "credits": round(prompt["credits"], 4),
+            }
+            for prompt in prompts
+        ],
+    }, indent=2))
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -885,6 +1039,9 @@ def main() -> None:
                      help="Report monthly data grouped by OpenCode session (no TUI)")
     ap.add_argument("--session", dest="session_id",
                     help="Limit data to one OpenCode session ID")
+    ap.add_argument("--prompts", nargs="?", const="short",
+                    choices=["short", "long", "full"],
+                    help="Print prompts for --session (short, long, or full)")
     ap.add_argument("--remaining", action="store_true",
                     help="Print the number of AI credits left this month and exit "
                          "(cannot be combined with --output)")
@@ -892,19 +1049,32 @@ def main() -> None:
                     help="Never fetch pricing over the network; use cached/bundled pricing only")
     args = ap.parse_args()
 
-    if args.remaining and (args.output or args.sessions or args.session_id):
-        ap.error("--remaining cannot be combined with --output, --sessions, or --session; "
+    if args.prompts and not args.session_id:
+        ap.error("--prompts requires --session SESSION_ID")
+    if args.prompts and args.sessions:
+        ap.error("--prompts cannot be combined with --sessions")
+    if args.remaining and (args.output or args.sessions or args.session_id or args.prompts):
+        ap.error("--remaining cannot be combined with --output, --sessions, --session, or --prompts; "
                  "use --output json, which already reports remaining_credits")
 
     global PRICING, PRICING_META
     if not args.offline:
         PRICING, PRICING_META = pricing_source.load_pricing(refresh=True)
 
-    if args.output or args.remaining or args.sessions:
+    if args.output or args.remaining or args.sessions or args.prompts:
         start_ms, end_ms = range_bounds("month", args.month)
         rows = filter_session_rows(
             fetch_rows(args.db, start_ms, end_ms), args.session_id
         )
+        if args.prompts:
+            prompts = attach_prompt_usage(
+                fetch_prompts(args.db, args.session_id, start_ms, end_ms), rows
+            )
+            if args.output == "json":
+                output_prompts_json(prompts, args.prompts, args.month)
+            else:
+                output_prompts_table(prompts, args.prompts)
+            return
         model_rows = summarize_by_model(rows)
         session_rows = summarize_by_session(rows)
         total = sum(credits(m["usd"]) for _, m in model_rows if m["priced"])

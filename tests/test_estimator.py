@@ -334,3 +334,75 @@ def test_output_json_does_not_include_sessions(capsys):
 
     estimator.output_json([], 0.0, 50_000.0)
     assert "sessions" not in json.loads(capsys.readouterr().out)
+
+
+def test_prompt_preview_modes():
+    text = "First line " + "x" * 400 + "\nsecond line"
+
+    assert len(estimator.prompt_preview(text, "short")) == 80
+    assert len(estimator.prompt_preview(text, "long")) == 300
+    assert estimator.prompt_preview(text, "full") == text
+
+
+def test_attach_prompt_usage_assigns_requests_to_prompts(monkeypatch):
+    monkeypatch.setattr(estimator, "PRICING", {
+        "test-model": (1.0, 0.5, None, 2.0),
+    })
+    prompts = [
+        {"ts_ms": 100, "prompt": "first"},
+        {"ts_ms": 300, "prompt": "second"},
+    ]
+    rows = [{
+        "ts_ms": 200, "model": "test-model", "input": 1_000,
+        "output": 200, "reasoning": 0, "cache_read": 0, "cache_write": 0,
+    }, {
+        "ts_ms": 400, "model": "test-model", "input": 2_000,
+        "output": 300, "reasoning": 0, "cache_read": 0, "cache_write": 0,
+    }]
+
+    estimator.attach_prompt_usage(prompts, rows)
+
+    assert prompts[0]["requests"] == 1
+    assert prompts[1]["requests"] == 1
+    assert prompts[0]["input"] == 1_000
+    assert prompts[1]["input"] == 2_000
+
+
+def test_output_prompts_short_has_header_and_inline_data(capsys):
+    prompt = {
+        "session_id": "session-a", "session_title": "Full session name",
+        "project_name": "Project A", "prompt": "Do the thing",
+        "ts_ms": 100, "requests": 1, "input": 10, "output": 5,
+        "cache_read": 0, "cache_write": 0, "credits": 1.0,
+    }
+
+    estimator.output_prompts_table([prompt], "short")
+    out = capsys.readouterr().out
+
+    assert "Session: session-a" in out
+    assert "Name: Full session name" in out
+    assert "Project: Project A" in out
+    assert "Timestamp        Prompt" in out
+    assert "Reqs      Input     Output    Cache R    Cache W    Credits" in out
+    assert "Data" not in out
+    assert estimator.prompt_timestamp(prompt) in out
+    assert "Do the thing" in out
+    assert "        1.0" in out
+
+
+def test_output_prompts_full_puts_data_on_next_line(capsys):
+    prompt = {
+        "session_id": "session-a", "session_title": "A task",
+        "project_name": "Project A", "prompt": "line one\nline two",
+        "ts_ms": 100, "requests": 1, "input": 10, "output": 5,
+        "cache_read": 0, "cache_write": 0, "credits": 1.0,
+    }
+
+    estimator.output_prompts_table([prompt], "full")
+    lines = capsys.readouterr().out.splitlines()
+    prompt_index = next(i for i, line in enumerate(lines) if line.endswith("line one"))
+
+    assert lines[prompt_index + 1] == "line two"
+    assert lines[prompt_index + 2] == ""
+    assert "1 requests" in lines[prompt_index + 3]
+    assert lines[prompt_index + 4] == "    CREDITS: 1.0"

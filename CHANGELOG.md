@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `--sessions` to report estimated AI credit consumption grouped by OpenCode session. Use it with `--output table` or `--output json`.
 - Added `--month YYYY-MM` to estimate a specific calendar month in the TUI and all non-interactive output modes.
 - Added `--session SESSION_ID` to filter the TUI and non-interactive output to one OpenCode session.
+- Added `--prompts[=short|long|full]` to print user prompts and their usage data for a selected session.
+- Long and full prompt output now places credits on a separate indented line for easier scanning.
 
 ## [0.4.0] - 2026-09-17
 
