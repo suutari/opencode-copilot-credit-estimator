@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Fixed the Today chart timeline to start at local midnight and use local-time labels.
+- Fixed the week chart to label every weekday in local time.
+- Fixed the month chart to use local-month boundaries and local-date buckets.
+- Fixed month chart points to align cumulative usage with their displayed day labels.
+- Fixed the current-month chart to include today’s local-midnight bucket.
 
 ## [0.4.0] - 2026-09-17
 

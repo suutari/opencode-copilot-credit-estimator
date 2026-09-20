@@ -22,6 +22,7 @@ Usage:
 
 import argparse
 import calendar
+import math
 import os
 import re
 import sqlite3
@@ -150,7 +151,7 @@ def selected_time_range(kind: str, value: str | date | datetime | None = None,
     current = _local_now(now)
     if kind == "month":
         month = value if isinstance(value, date) else current.date().replace(day=1)
-        start = datetime(month.year, month.month, 1, tzinfo=timezone.utc)
+        start = datetime(month.year, month.month, 1, tzinfo=current.tzinfo)
         end = (start.replace(year=start.year + 1, month=1)
                if start.month == 12 else start.replace(month=start.month + 1))
         if end > current:
@@ -218,15 +219,16 @@ def parse_month(value: str) -> date:
 
 
 def month_bounds(month: date | None = None) -> tuple[datetime, datetime]:
-    """Return UTC start and exclusive end datetimes for a calendar month."""
+    """Return local start and exclusive end datetimes for a calendar month."""
     if month is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now().astimezone()
         month = now.date().replace(day=1)
-    start = datetime(month.year, month.month, 1, tzinfo=timezone.utc)
+    local_tz = datetime.now().astimezone().tzinfo
+    start = datetime(month.year, month.month, 1, tzinfo=local_tz)
     if month.month == 12:
-        end = datetime(month.year + 1, 1, 1, tzinfo=timezone.utc)
+        end = datetime(month.year + 1, 1, 1, tzinfo=local_tz)
     else:
-        end = datetime(month.year, month.month + 1, 1, tzinfo=timezone.utc)
+        end = datetime(month.year, month.month + 1, 1, tzinfo=local_tz)
     return start, end
 
 
@@ -438,19 +440,18 @@ def build_series(
             return (start + timedelta(hours=i)).strftime("%H:%M")
     elif range_key == "week":
         # Hourly buckets from Monday 00:00 to now
-        start = (time_range.start.astimezone(timezone.utc) if time_range else
-                 (now - timedelta(days=now.weekday())).replace(
-                     hour=0, minute=0, second=0, microsecond=0))
-        end = time_range.end.astimezone(timezone.utc) if time_range else now
-        total_hours = int((end - start).total_seconds() / 3600) + 1
-        n_buckets = total_hours
+        start = (time_range.start.astimezone(local_tz) if time_range else
+                 now.astimezone(local_tz).replace(
+                     hour=0, minute=0, second=0, microsecond=0) -
+                 timedelta(days=now.astimezone(local_tz).weekday()))
+        end = time_range.end.astimezone(local_tz) if time_range else now.astimezone(local_tz)
+        n_buckets = max(math.ceil((end - start).total_seconds() / 3600), 1)
         day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         def bucket_fn(ts_ms):
-            dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+            dt = datetime.fromtimestamp(ts_ms / 1000, tz=local_tz)
             return int((dt - start).total_seconds() / 3600)
         def label_fn(i):
-            # Use local time to determine day boundaries for labels
-            dt = (start + timedelta(hours=i)).astimezone(local_tz)
+            dt = start + timedelta(hours=i)
             if dt.hour == 0:
                 return day_names[dt.weekday()]
             return ""
@@ -458,17 +459,15 @@ def build_series(
         # Daily buckets from the first through the last selected month day.
         start, month_end = month_bounds(month)
         if time_range:
-            start = time_range.start.astimezone(timezone.utc)
-            month_end = time_range.end.astimezone(timezone.utc)
-        end = min(month_end, now)
-        n_buckets = (
-            now.date().day
-            if end < month_end
-            else (month_end.date() - start.date()).days
-        )
+            start = time_range.start.astimezone(local_tz)
+            month_end = time_range.end.astimezone(local_tz)
+        end = min(month_end, now.astimezone(local_tz))
+        n_buckets = (end.date() - start.date()).days
+        if end.time() != datetime.min.time():
+            n_buckets += 1
         n_buckets = max(n_buckets, 1)
         def bucket_fn(ts_ms):
-            dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+            dt = datetime.fromtimestamp(ts_ms / 1000, tz=local_tz)
             return (dt.date() - start.date()).days
         def label_fn(i):
             return str(i + 1)
@@ -608,8 +607,17 @@ class CreditChart(PlotextPlot):
             plt.title("No data")
             return
 
-        xs = list(range(len(self._values)))
-        plt.plot(xs, self._values, color="cyan", label="Credits used")
+        # Daily values are measured at each day's midnight. Add the following
+        # midnight as an unlabeled endpoint so the final day's value reaches
+        # the right edge without displaying a fictitious day 32.
+        is_daily = bool(self._labels and self._labels[-1].isdigit())
+        xs = list(range(1, len(self._values) + 1))
+        values = self._values
+        if is_daily:
+            xs = list(range(1, len(self._values) + 2))
+            values = [0.0, *self._values]
+            plt.xlim(1, len(self._labels) + 1)
+        plt.plot(xs, values, color="cyan", label="Credits used")
 
         pct = (self._total / self._budget * 100) if self._budget else 0
         plt.title(
@@ -618,8 +626,11 @@ class CreditChart(PlotextPlot):
 
         # Show only a sparse set of x-tick labels to avoid overlap
         tick_step = max(1, len(self._labels) // 12)
-        tick_xs = list(range(0, len(self._labels), tick_step))
-        tick_labels = [self._labels[i] for i in tick_xs]
+        tick_xs = sorted({
+            *range(1, len(self._labels) + 1, tick_step),
+            *(i + 1 for i, label in enumerate(self._labels) if label),
+        })
+        tick_labels = [self._labels[i - 1] for i in tick_xs]
         plt.xticks(tick_xs, tick_labels)
 
 

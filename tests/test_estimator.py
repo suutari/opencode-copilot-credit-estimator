@@ -171,6 +171,28 @@ def test_today_series_starts_at_local_midnight(monkeypatch):
     assert values[3] == 0.0
 
 
+def test_week_series_labels_every_weekday(monkeypatch):
+    local_tz = timezone(timedelta(hours=3))
+    start = datetime(2026, 9, 14, 0, 0, tzinfo=local_tz)
+    period = estimator.TimeRange(
+        start, start + timedelta(days=7), "2026-W38"
+    )
+    monkeypatch.setattr(estimator, "PRICING", {"test-model": (1.0, 0.0, None, 1.0)})
+    rows = [{
+        "ts_ms": int(start.timestamp() * 1000),
+        "model": "test-model",
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+    }]
+    labels, values = estimator.build_series(rows, "week", time_range=period)
+    assert [label for label in labels if label] == [
+        "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+    ]
+
+
 def test_derived_ranges_follow_hour_anchor():
     now = datetime(2026, 9, 20, 22, 15, tzinfo=timezone.utc)
     ranges = estimator.derived_time_ranges(
@@ -198,14 +220,93 @@ def test_derived_ranges_use_noon_wednesday_and_fifteenth_fallbacks():
 
 def test_month_bounds_handles_leap_year():
     start, end = estimator.month_bounds(date(2024, 2, 1))
-    assert start == datetime(2024, 2, 1, tzinfo=timezone.utc)
-    assert end == datetime(2024, 3, 1, tzinfo=timezone.utc)
+    local_tz = datetime.now().astimezone().tzinfo
+    assert start == datetime(2024, 2, 1, tzinfo=local_tz)
+    assert end == datetime(2024, 3, 1, tzinfo=local_tz)
 
 
 def test_range_bounds_for_historical_month():
     start_ms, end_ms = estimator.range_bounds("month", date(2024, 2, 1))
-    assert start_ms == int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp() * 1000)
-    assert end_ms == int(datetime(2024, 3, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    local_tz = datetime.now().astimezone().tzinfo
+    assert start_ms == int(datetime(2024, 2, 1, tzinfo=local_tz).timestamp() * 1000)
+    assert end_ms == int(datetime(2024, 3, 1, tzinfo=local_tz).timestamp() * 1000)
+
+
+def test_month_series_buckets_by_local_date(monkeypatch):
+    local_tz = timezone(timedelta(hours=3))
+    start = datetime(2026, 9, 1, tzinfo=local_tz)
+    period = estimator.TimeRange(start, start + timedelta(days=3), "2026-09")
+    monkeypatch.setattr(estimator, "PRICING", {"test-model": (1.0, 0.0, None, 1.0)})
+    rows = [{
+        "ts_ms": int(datetime(2026, 9, 2, 0, 30, tzinfo=local_tz).timestamp() * 1000),
+        "model": "test-model",
+        "input": 1_000_000,
+        "output": 0,
+        "reasoning": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+    }]
+    labels, values = estimator.build_series(rows, "month", time_range=period)
+    assert labels[:3] == ["1", "2", "3"]
+    assert values[0] == 0.0
+    assert values[1] == 100.0
+
+
+def test_current_month_series_includes_today_bucket():
+    local_tz = timezone(timedelta(hours=3))
+    now = datetime(2026, 9, 20, 5, 30, tzinfo=local_tz)
+    period = estimator.TimeRange(
+        datetime(2026, 9, 1, tzinfo=local_tz), now, "2026-09"
+    )
+    rows = [{
+        "ts_ms": int(datetime(2026, 9, 20, 0, 15, tzinfo=local_tz).timestamp() * 1000),
+        "model": "test-model",
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+    }]
+    labels, _ = estimator.build_series(rows, "month", time_range=period)
+    assert labels[-1] == "20"
+
+
+def test_chart_uses_one_based_bucket_positions():
+    chart = estimator.CreditChart()
+    chart.update_data(["1", "2", "3"], [0.0, 100.0, 100.0], "Month", 50_000)
+    assert chart._labels == ["1", "2", "3"]
+    assert chart._values == [0.0, 100.0, 100.0]
+
+
+def test_daily_chart_starts_cumulative_values_at_day_end():
+    chart = estimator.CreditChart()
+    chart.update_data(["1", "2", "3"], [0.0, 100.0, 100.0], "Month", 50_000)
+    assert chart._values[0] == 0.0
+    assert chart._values[-1] == 100.0
+
+
+def test_august_month_and_day_series_use_the_same_local_day(monkeypatch):
+    local_tz = timezone(timedelta(hours=3))
+    now = datetime(2026, 9, 20, 22, tzinfo=local_tz)
+    month_range = estimator.selected_time_range("month", date(2026, 8, 1), now)
+    day22_range = estimator.selected_time_range("day", date(2026, 8, 22), now)
+    day23_range = estimator.selected_time_range("day", date(2026, 8, 23), now)
+    monkeypatch.setattr(estimator, "PRICING", {"test-model": (1.0, 0.0, None, 1.0)})
+    row = {
+        "ts_ms": int(datetime(2026, 8, 22, 12, tzinfo=local_tz).timestamp() * 1000),
+        "model": "test-model",
+        "input": 1_000_000,
+        "output": 0,
+        "reasoning": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+    }
+    _, month_values = estimator.build_series([row], "month", time_range=month_range)
+    _, day22_values = estimator.build_series([row], "today", time_range=day22_range)
+    _, day23_values = estimator.build_series([row], "today", time_range=day23_range)
+    assert month_values[21] == 100.0  # August 22
+    assert day22_values[-1] == 100.0
+    assert day23_values[-1] == 0.0
 
 
 def test_output_json_reports_selected_month(capsys):
