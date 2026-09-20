@@ -80,7 +80,8 @@ def range_bounds(range_key: str) -> tuple[int, int]:
 def fetch_rows(db_path: str, start_ms: int, end_ms: int) -> list[dict]:
     """
     Return one dict per assistant message within [start_ms, end_ms).
-    Each dict has: ts_ms, model, input, output, reasoning, cache_read, cache_write.
+    Each dict has: ts_ms, session_id, session_title, model, input, output,
+    reasoning, cache_read, cache_write.
     """
     if not os.path.exists(db_path):
         return []
@@ -90,18 +91,21 @@ def fetch_rows(db_path: str, start_ms: int, end_ms: int) -> list[dict]:
     cur.execute(
         """
         SELECT
-            time_created AS ts_ms,
-            json_extract(data, '$.modelID')            AS model,
-            COALESCE(json_extract(data, '$.tokens.input'),       0) AS input,
-            COALESCE(json_extract(data, '$.tokens.output'),      0) AS output,
-            COALESCE(json_extract(data, '$.tokens.reasoning'),   0) AS reasoning,
-            COALESCE(json_extract(data, '$.tokens.cache.read'),  0) AS cache_read,
-            COALESCE(json_extract(data, '$.tokens.cache.write'), 0) AS cache_write
-        FROM message
-        WHERE json_extract(data, '$.role')       = 'assistant'
-          AND json_extract(data, '$.providerID') = 'github-copilot'
-          AND time_created >= ? AND time_created < ?
-        ORDER BY time_created
+            m.time_created AS ts_ms,
+            m.session_id AS session_id,
+            COALESCE(s.title, '') AS session_title,
+            json_extract(m.data, '$.modelID')            AS model,
+            COALESCE(json_extract(m.data, '$.tokens.input'),       0) AS input,
+            COALESCE(json_extract(m.data, '$.tokens.output'),      0) AS output,
+            COALESCE(json_extract(m.data, '$.tokens.reasoning'),   0) AS reasoning,
+            COALESCE(json_extract(m.data, '$.tokens.cache.read'),  0) AS cache_read,
+            COALESCE(json_extract(m.data, '$.tokens.cache.write'), 0) AS cache_write
+        FROM message AS m
+        LEFT JOIN session AS s ON s.id = m.session_id
+        WHERE json_extract(m.data, '$.role')       = 'assistant'
+          AND json_extract(m.data, '$.providerID') = 'github-copilot'
+          AND m.time_created >= ? AND m.time_created < ?
+        ORDER BY m.time_created
         """,
         (start_ms, end_ms),
     )
@@ -237,6 +241,47 @@ def summarize_by_model(rows: list[dict]) -> list[tuple[str, dict]]:
             m["priced"] = False
 
     return sorted(by_model.items(), key=lambda kv: -kv[1]["usd"])
+
+
+def summarize_by_session(rows: list[dict]) -> list[tuple[str, dict]]:
+    """Aggregate rows by OpenCode session, compute cost, and sort by cost."""
+    by_session: dict[str, dict] = {}
+    for r in rows:
+        session_id = r.get("session_id") or "unknown"
+        session = by_session.setdefault(
+            session_id,
+            {
+                "title": r.get("session_title") or "Untitled session",
+                "requests": 0,
+                "input": 0,
+                "output": 0,
+                "cache_read": 0,
+                "cache_write": 0,
+                "first_ts_ms": r["ts_ms"],
+                "last_ts_ms": r["ts_ms"],
+                "usd": 0.0,
+                "priced": True,
+            },
+        )
+        session["requests"] += 1
+        session["input"] += r["input"]
+        session["output"] += r["output"] + r["reasoning"]
+        session["cache_read"] += r["cache_read"]
+        session["cache_write"] += r["cache_write"]
+        session["first_ts_ms"] = min(session["first_ts_ms"], r["ts_ms"])
+        session["last_ts_ms"] = max(session["last_ts_ms"], r["ts_ms"])
+        session["usd"] += cost_usd(
+            r["model"] or "",
+            r["input"],
+            r["output"],
+            r["reasoning"],
+            r["cache_read"],
+            r["cache_write"],
+        )
+        if (r["model"] or "") not in PRICING:
+            session["priced"] = False
+
+    return sorted(by_session.items(), key=lambda kv: -kv[1]["usd"])
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +616,31 @@ class CreditEstimatorApp(App):
 # Non-interactive output modes
 # ---------------------------------------------------------------------------
 
+def session_output_rows(
+    session_rows: list[tuple[str, dict]], total_credits: float, budget: float
+) -> list[dict]:
+    rows = []
+    for session_id, session in session_rows:
+        cred_val = credits(session["usd"])
+        rows.append({
+            "session_id": session_id,
+            "title": session["title"],
+            "requests": session["requests"],
+            "input_tokens": session["input"],
+            "output_tokens": session["output"],
+            "cache_read_tokens": session["cache_read"],
+            "cache_write_tokens": session["cache_write"],
+            "first_timestamp_ms": session["first_ts_ms"],
+            "last_timestamp_ms": session["last_ts_ms"],
+            "credits": round(cred_val, 4) if session["priced"] else None,
+            "pct_of_used": round(cred_val / total_credits * 100, 2)
+            if (session["priced"] and total_credits) else None,
+            "pct_of_budget": round(cred_val / budget * 100, 4)
+            if (session["priced"] and budget) else None,
+        })
+    return rows
+
+
 def output_json(model_rows: list[tuple[str, dict]], total_credits: float, budget: float) -> None:
     import json as _json
     rows = []
@@ -640,6 +710,75 @@ def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budge
     print("Local estimate from opencode logs only — https://github.com/settings/copilot/features for actuals.")
 
 
+def output_sessions_table(
+    session_rows: list[tuple[str, dict]], total_credits: float, budget: float
+) -> None:
+    """Print the current month's estimated credits grouped by OpenCode session."""
+    header = (
+        f"{'Session':<36} {'Reqs':>6} {'Input':>12} {'Output':>10} "
+        f"{'Cache R':>10} {'Cache W':>10} {'Credits':>10} {'% used':>8} {'% budget':>10}"
+    )
+    print("\nOpencode -> GitHub Copilot AI credit estimate by session (this month)")
+    print("=" * len(header))
+    print(header)
+    print("-" * len(header))
+    for session_id, session in session_rows:
+        cred_val = credits(session["usd"])
+        cred = f"{cred_val:,.1f}" if session["priced"] else "?"
+        pct_used = (
+            f"{cred_val / total_credits * 100:.1f}%"
+            if (session["priced"] and total_credits) else "?"
+        )
+        pct_budget = (
+            f"{cred_val / budget * 100:.2f}%"
+            if (session["priced"] and budget) else "?"
+        )
+        label = session["title"] or "Untitled session"
+        if len(label) > 34:
+            label = label[:31] + "..."
+        print(
+            f"{label:<36} {session['requests']:>6,} {session['input']:>12,} "
+            f"{session['output']:>10,} {session['cache_read']:>10,} "
+            f"{session['cache_write']:>10,} {cred:>10} {pct_used:>8} {pct_budget:>10}"
+        )
+        print(f"  {session_id}")
+    print("-" * len(header))
+    pct_budget_total = total_credits / budget * 100 if budget else 0
+    print(
+        f"{'TOTAL':<36} {'':>6} {'':>12} {'':>10} {'':>10} {'':>10} "
+        f"{total_credits:>10,.1f} {'100.0%':>8} {pct_budget_total:>9.2f}%"
+    )
+    print(f"\nBudget: {budget:,.0f} AI credits")
+    remaining = budget - total_credits
+    pct_remaining = f" ({remaining / budget * 100:.1f}%)" if budget else ""
+    days = days_until_budget_reset()
+    reset = "resets tomorrow" if days == 1 else f"resets in {days} days"
+    print(f"Remaining: {remaining:,.1f} AI credits{pct_remaining} — budget {reset}")
+    retrieved_at = PRICING_META.get("retrieved_at")
+    if retrieved_at:
+        print(f"Pricing last refreshed: {retrieved_at}")
+    print("Local estimate from opencode logs only — https://github.com/settings/copilot/features for actuals.")
+
+
+def output_sessions_json(
+    session_rows: list[tuple[str, dict]], total_credits: float, budget: float
+) -> None:
+    import json as _json
+    print(_json.dumps({
+        "period": "month",
+        "budget": budget,
+        "total_credits": round(total_credits, 4),
+        "pct_of_budget": round(total_credits / budget * 100, 2) if budget else None,
+        "remaining_credits": round(budget - total_credits, 4),
+        "pct_remaining": round((budget - total_credits) / budget * 100, 2)
+        if budget else None,
+        "days_until_reset": days_until_budget_reset(),
+        "sessions": session_output_rows(session_rows, total_credits, budget),
+        "pricing_source": PRICING_META.get("source"),
+        "pricing_retrieved_at": PRICING_META.get("retrieved_at"),
+    }, indent=2))
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -660,7 +799,9 @@ def main() -> None:
     ap.add_argument("--compact-height", type=int, default=COMPACT_HEIGHT,
                     help=f"Terminal height threshold below which compact mode activates (default {COMPACT_HEIGHT})")
     ap.add_argument("--output", choices=["json", "table"], default=None,
-                    help="Print monthly data in the given format and exit (no TUI)")
+                     help="Print monthly data in the given format and exit (no TUI)")
+    ap.add_argument("--sessions", action="store_true",
+                    help="Report monthly data grouped by OpenCode session (no TUI)")
     ap.add_argument("--remaining", action="store_true",
                     help="Print the number of AI credits left this month and exit "
                          "(cannot be combined with --output)")
@@ -668,21 +809,26 @@ def main() -> None:
                     help="Never fetch pricing over the network; use cached/bundled pricing only")
     args = ap.parse_args()
 
-    if args.remaining and args.output:
-        ap.error("--remaining cannot be combined with --output; "
+    if args.remaining and (args.output or args.sessions):
+        ap.error("--remaining cannot be combined with --output or --sessions; "
                  "use --output json, which already reports remaining_credits")
 
     global PRICING, PRICING_META
     if not args.offline:
         PRICING, PRICING_META = pricing_source.load_pricing(refresh=True)
 
-    if args.output or args.remaining:
+    if args.output or args.remaining or args.sessions:
         start_ms, end_ms = range_bounds("month")
         rows = fetch_rows(args.db, start_ms, end_ms)
         model_rows = summarize_by_model(rows)
+        session_rows = summarize_by_session(rows)
         total = sum(credits(m["usd"]) for _, m in model_rows if m["priced"])
         if args.remaining:
             output_remaining(total, args.budget)
+        elif args.sessions and args.output == "json":
+            output_sessions_json(session_rows, total, args.budget)
+        elif args.sessions:
+            output_sessions_table(session_rows, total, args.budget)
         elif args.output == "json":
             output_json(model_rows, total, args.budget)
         else:

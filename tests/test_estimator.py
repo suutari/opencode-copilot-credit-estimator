@@ -150,3 +150,98 @@ def test_output_json_remaining_with_zero_budget(capsys):
     data = json.loads(capsys.readouterr().out)
     assert data["remaining_credits"] == -10.0
     assert data["pct_remaining"] is None
+
+
+def test_summarize_by_session_groups_requests(monkeypatch):
+    monkeypatch.setattr(estimator, "PRICING", {
+        "test-model": (1.0, 0.5, None, 2.0),
+    })
+    rows = [
+        {
+            "ts_ms": 200,
+            "session_id": "session-a",
+            "session_title": "First task",
+            "model": "test-model",
+            "input": 1_000_000,
+            "output": 100_000,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+        },
+        {
+            "ts_ms": 100,
+            "session_id": "session-a",
+            "session_title": "First task",
+            "model": "test-model",
+            "input": 500_000,
+            "output": 0,
+            "reasoning": 100_000,
+            "cache_read": 0,
+            "cache_write": 0,
+        },
+        {
+            "ts_ms": 300,
+            "session_id": "session-b",
+            "session_title": "Second task",
+            "model": "test-model",
+            "input": 1_000_000,
+            "output": 0,
+            "reasoning": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+        },
+    ]
+
+    sessions = estimator.summarize_by_session(rows)
+
+    assert [session_id for session_id, _ in sessions] == ["session-a", "session-b"]
+    session = sessions[0][1]
+    assert session["title"] == "First task"
+    assert session["requests"] == 2
+    assert session["input"] == 1_500_000
+    assert session["output"] == 200_000
+    assert session["first_ts_ms"] == 100
+    assert session["last_ts_ms"] == 200
+    assert session["usd"] == pytest.approx(1.9)
+
+
+def test_output_sessions_shows_session_breakdown(monkeypatch, capsys):
+    monkeypatch.setattr(estimator, "PRICING_META", {})
+    rows = [("session-a", {
+        "title": "A task", "requests": 2, "input": 1_000, "output": 500,
+        "cache_read": 0, "cache_write": 0, "first_ts_ms": 100,
+        "last_ts_ms": 200, "usd": 1.25, "priced": True,
+    })]
+
+    estimator.output_sessions_table(rows, 125.0, 50_000.0)
+    out = capsys.readouterr().out
+
+    assert "estimate by session" in out
+    assert "A task" in out
+    assert "session-a" in out
+    assert "125.0" in out
+
+
+def test_output_sessions_json_includes_sessions(monkeypatch, capsys):
+    import json
+
+    monkeypatch.setattr(estimator, "PRICING_META", {})
+    rows = [("session-a", {
+        "title": "A task", "requests": 1, "input": 10, "output": 5,
+        "cache_read": 0, "cache_write": 0, "first_ts_ms": 100,
+        "last_ts_ms": 100, "usd": 0.01, "priced": True,
+    })]
+
+    estimator.output_sessions_json(rows, 1.0, 50_000.0)
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["sessions"][0]["session_id"] == "session-a"
+    assert data["sessions"][0]["title"] == "A task"
+    assert data["sessions"][0]["credits"] == 1.0
+
+
+def test_output_json_does_not_include_sessions(capsys):
+    import json
+
+    estimator.output_json([], 0.0, 50_000.0)
+    assert "sessions" not in json.loads(capsys.readouterr().out)

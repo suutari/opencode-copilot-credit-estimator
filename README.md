@@ -70,7 +70,18 @@ occe --output table
 
 # JSON (useful for scripting/piping)
 occe --output json
+
+# Per-session table
+occe --sessions
+
+# Per-session JSON
+occe --sessions --output json
 ```
+
+The `--sessions` flag groups the current month's requests by OpenCode session
+and reports each session's title, request count, token totals, and estimated
+AI credits. Use `--output table` (the default) or `--output json` to select the
+rendering format.
 
 ### Remaining budget
 
@@ -99,6 +110,7 @@ occe --remaining
 | `--compact-width` | `80` | Terminal width (columns) below which compact mode activates |
 | `--compact-height` | `30` | Terminal height (rows) below which compact mode activates |
 | `--output` | — | Print monthly data as `table` or `json` and exit |
+| `--sessions` | off | Group non-interactive output by OpenCode session instead of model |
 | `--remaining` | off | Print the number of AI credits left this month and exit (not combinable with `--output`) |
 | `--offline` | off | Skip network pricing refresh; use cached/bundled pricing only |
 
@@ -162,4 +174,3 @@ Released under the [MIT License](LICENSE).
 ## Maintenance & support
 
 This project is maintained by Springer Nature on a best-effort basis. Bug reports and pull requests are welcome via [GitHub Issues](https://github.com/springernature/opencode-copilot-credit-estimator/issues). There is no guaranteed response time or SLA.
-
