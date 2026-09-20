@@ -1365,7 +1365,8 @@ def main() -> None:
     app = CreditEstimatorApp(db=args.db, budget=args.budget, interval=args.interval,
                               compact_width=args.compact_width, compact_height=args.compact_height,
                               offline=args.offline, month=args.month,
-                              selected_range=selected_range, initial_tab=initial_tab,
+                              selected_range=selected_range if selectors else None,
+                              initial_tab=initial_tab,
                               selected_ranges=selected_ranges,
                               session_id=args.session_id)
     app.run()

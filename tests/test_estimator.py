@@ -271,6 +271,14 @@ def test_current_time_uses_current_help_labels():
     assert labels["2"] == "Day"
 
 
+@pytest.mark.asyncio
+async def test_default_tui_keeps_live_month_tab_label():
+    app = make_app()
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        assert str(app.query_one("#month").label) == "This month"
+
+
 def test_navigation_help_bindings_are_available():
     app = make_app()
     bindings = {binding.action: binding for binding in app.BINDINGS}
