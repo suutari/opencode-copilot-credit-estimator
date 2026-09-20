@@ -25,6 +25,7 @@ import calendar
 import os
 import re
 import sqlite3
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from itertools import accumulate
 
@@ -58,6 +59,152 @@ PRICING, PRICING_META = pricing_source.load_pricing(refresh=False)
 # ---------------------------------------------------------------------------
 # Data layer
 # ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class TimeRange:
+    """An inclusive-start, exclusive-end range in an aware local timezone."""
+
+    start: datetime
+    end: datetime
+    label: str
+
+    @property
+    def start_ms(self) -> int:
+        return int(self.start.timestamp() * 1000)
+
+    @property
+    def end_ms(self) -> int:
+        return int(self.end.timestamp() * 1000)
+
+
+def _local_now(now: datetime | None = None) -> datetime:
+    return now if now is not None else datetime.now().astimezone()
+
+
+def _day_range(day: date, now: datetime) -> TimeRange:
+    start = datetime.combine(day, datetime.min.time(), tzinfo=now.tzinfo)
+    end = start + timedelta(days=1)
+    if end > now:
+        end = now
+    return TimeRange(start, end, day.isoformat())
+
+
+def parse_week(value: str, now: datetime | None = None) -> date:
+    """Parse an ISO week selector and return its Monday."""
+    match = re.fullmatch(r"(?:(\d{4})-?W)?(\d{1,2})", value, re.IGNORECASE)
+    if not match:
+        raise argparse.ArgumentTypeError("week must use YYYY-Www, YYYYWww, or ww format")
+    year = int(match.group(1) or _local_now(now).year)
+    week = int(match.group(2))
+    try:
+        return date.fromisocalendar(year, week, 1)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("week must be a valid ISO week number") from exc
+
+
+def parse_day(value: str, now: datetime | None = None) -> date:
+    """Parse an ISO date or the most recent matching bare day of month."""
+    current = _local_now(now)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError("day must be an ISO date or day number") from exc
+    if not re.fullmatch(r"\d{1,2}", value) or not 1 <= int(value) <= 31:
+        raise argparse.ArgumentTypeError("day must be an ISO date or a number from 1 to 31")
+    wanted = int(value)
+    candidate = current.date()
+    for _ in range(31):
+        if candidate.day == wanted:
+            return candidate
+        candidate -= timedelta(days=1)
+    raise argparse.ArgumentTypeError("day number was not found in the last 31 days")
+
+
+def parse_hour(value: str, now: datetime | None = None) -> datetime:
+    """Parse a local ISO date/hour or the most recent bare hour."""
+    current = _local_now(now).replace(minute=0, second=0, microsecond=0)
+    if re.fullmatch(r"\d{1,2}", value):
+        hour = int(value)
+        if not 0 <= hour <= 23:
+            raise argparse.ArgumentTypeError("hour must be an ISO hour or a number from 0 to 23")
+        candidate = current.replace(hour=hour)
+        if candidate > current:
+            candidate -= timedelta(days=1)
+        return candidate
+    normalized = value.replace(" ", "T")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("hour must use YYYY-MM-DDTHH or YYYY-MM-DD HH format") from exc
+    was_naive = parsed.tzinfo is None
+    if was_naive:
+        parsed = parsed.replace(tzinfo=current.tzinfo)
+    parsed = parsed.replace(minute=0, second=0, microsecond=0)
+    return parsed if was_naive else parsed.astimezone()
+
+
+def selected_time_range(kind: str, value: str | date | datetime | None = None,
+                        now: datetime | None = None) -> TimeRange:
+    """Build a calendar or rolling range for a CLI selector or TUI tab."""
+    current = _local_now(now)
+    if kind == "month":
+        month = value if isinstance(value, date) else current.date().replace(day=1)
+        start = datetime(month.year, month.month, 1, tzinfo=timezone.utc)
+        end = (start.replace(year=start.year + 1, month=1)
+               if start.month == 12 else start.replace(month=start.month + 1))
+        if end > current:
+            end = current
+        return TimeRange(start, end, start.strftime("%Y-%m"))
+    if kind == "week":
+        monday = value if isinstance(value, date) else current.date() - timedelta(days=current.weekday())
+        start = datetime.combine(monday, datetime.min.time(), tzinfo=current.tzinfo)
+        return TimeRange(start, min(start + timedelta(days=7), current),
+                         f"{monday.isocalendar().year}-W{monday.isocalendar().week:02d}")
+    if kind in ("today", "day"):
+        day = value if isinstance(value, date) else current.date()
+        return _day_range(day, current)
+    if kind in ("hour", "hours"):
+        hour = value if isinstance(value, datetime) else current - timedelta(hours=1)
+        return TimeRange(hour, min(hour + timedelta(hours=1), current),
+                         hour.strftime("%Y-%m-%dT%H"))
+    raise ValueError(f"Unknown range: {kind}")
+
+
+def derived_time_ranges(kind: str, value: date | datetime,
+                        now: datetime | None = None) -> dict[str, TimeRange]:
+    """Build all four calendar ranges around a selected time anchor."""
+    current = _local_now(now)
+    if kind == "hour":
+        hour = value if isinstance(value, datetime) else datetime.combine(
+            value, datetime.min.time(), tzinfo=current.tzinfo
+        )
+        anchor = hour.date()
+    elif kind == "day":
+        anchor = value if isinstance(value, date) else value.date()
+        hour = datetime.combine(anchor, datetime.min.time(), tzinfo=current.tzinfo) + timedelta(hours=12)
+    elif kind == "week":
+        monday = value if isinstance(value, date) else value.date()
+        anchor = monday + timedelta(days=2)
+        hour = datetime.combine(anchor, datetime.min.time(), tzinfo=current.tzinfo) + timedelta(hours=12)
+    elif kind == "month":
+        month = value if isinstance(value, date) else value.date()
+        anchor = month.replace(day=15)
+        hour = datetime.combine(anchor, datetime.min.time(), tzinfo=current.tzinfo) + timedelta(hours=12)
+    else:
+        raise ValueError(f"Unknown selector: {kind}")
+
+    week_monday = anchor - timedelta(days=anchor.weekday())
+    month = anchor.replace(day=1)
+    ranges = {
+        "hour": selected_time_range("hour", hour, current),
+        "today": selected_time_range("day", anchor, current),
+        "week": selected_time_range("week", week_monday, current),
+        "month": selected_time_range("month", month, current),
+    }
+    if kind == "hour":
+        ranges["hour"] = selected_time_range("hour", value, current)
+    return ranges
 
 def parse_month(value: str) -> date:
     """Parse a YYYY-MM month selector into its first day."""
@@ -95,29 +242,21 @@ def is_current_month(month: date | None) -> bool:
     return month is None or (month.year == now.year and month.month == now.month)
 
 
+def is_current_period_month(time_range: TimeRange | None, month: date | None) -> bool:
+    """Whether a selected range represents the current calendar month."""
+    if time_range is not None:
+        return False
+    return is_current_month(month)
+
+
 def range_bounds(range_key: str, month: date | None = None) -> tuple[int, int]:
     """Return (start_ms, end_ms) UTC for the given range key."""
-    now = datetime.now(timezone.utc)
-    if range_key == "hour":
-        start = now - timedelta(hours=1)
-    elif range_key == "today":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif range_key == "week":
-        start = (now - timedelta(days=now.weekday())).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-    elif range_key == "month":
-        start, end = month_bounds(month)
-        if end > now:
-            end = now
-        return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
-    else:
-        raise ValueError(f"Unknown range: {range_key}")
-    end = now
-    return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+    kind = "month" if range_key == "month" else range_key
+    period = selected_time_range(kind, month)
+    return period.start_ms, period.end_ms
 
 
-def fetch_rows(db_path: str, start_ms: int, end_ms: int) -> list[dict]:
+def fetch_rows(db_path: str, time_range: TimeRange) -> list[dict]:
     """
     Return one dict per assistant message within [start_ms, end_ms).
     Each dict has: ts_ms, session_id, session_title, project_name, model, input,
@@ -149,7 +288,7 @@ def fetch_rows(db_path: str, start_ms: int, end_ms: int) -> list[dict]:
           AND m.time_created >= ? AND m.time_created < ?
         ORDER BY m.time_created
         """,
-        (start_ms, end_ms),
+        (time_range.start_ms, time_range.end_ms),
     )
     rows = [dict(r) for r in cur.fetchall()]
     con.close()
@@ -163,7 +302,7 @@ def filter_session_rows(rows: list[dict], session_id: str | None) -> list[dict]:
     return [row for row in rows if row.get("session_id") == session_id]
 
 
-def fetch_prompts(db_path: str, session_id: str, start_ms: int, end_ms: int) -> list[dict]:
+def fetch_prompts(db_path: str, session_id: str, time_range: TimeRange) -> list[dict]:
     """Return user prompts and their metadata for one session and time range."""
     if not os.path.exists(db_path):
         return []
@@ -194,7 +333,7 @@ def fetch_prompts(db_path: str, session_id: str, start_ms: int, end_ms: int) -> 
         GROUP BY m.id, m.time_created, m.session_id, s.title, p.name, p.worktree
         ORDER BY m.time_created, m.id
         """,
-        (session_id, start_ms, end_ms),
+        (session_id, time_range.start_ms, time_range.end_ms),
     )
     rows = [dict(r) for r in cur.fetchall()]
     con.close()
@@ -259,7 +398,8 @@ def days_until_budget_reset(now: datetime | None = None) -> int:
 
 
 def build_series(
-    rows: list[dict], range_key: str, month: date | None = None
+    rows: list[dict], range_key: str, month: date | None = None,
+    time_range: TimeRange | None = None,
 ) -> tuple[list[str], list[float]]:
     """
     Bucket rows into time slots and return (x_labels, cumulative_credits).
@@ -274,7 +414,8 @@ def build_series(
 
     if range_key == "hour":
         # Per-minute buckets over the last 60 minutes
-        start = now - timedelta(hours=1)
+        start = (time_range.start.astimezone(timezone.utc) if time_range
+                 else now - timedelta(hours=1))
         start_local = start.astimezone(local_tz)
         n_buckets = 60
         def bucket_fn(ts_ms):
@@ -285,11 +426,13 @@ def build_series(
             return dt.strftime("%H:%M") if i % 10 == 0 else ""
     elif range_key == "today":
         # Hourly buckets from midnight to now
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        n_buckets = now.hour + 1
+        start = (time_range.start.astimezone(timezone.utc) if time_range
+                 else now.replace(hour=0, minute=0, second=0, microsecond=0))
+        end = time_range.end.astimezone(timezone.utc) if time_range else now
+        n_buckets = max(int((end - start).total_seconds() / 3600) + 1, 1)
         def bucket_fn(ts_ms):
             dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
-            return dt.hour
+            return int((dt - start).total_seconds() / 3600)
         utc_offset_hours = int(now_local.utcoffset().total_seconds() // 3600)  # type: ignore[union-attr]
         def label_fn(i):
             # Offset bucket index by local UTC offset so labels show local hours
@@ -297,10 +440,11 @@ def build_series(
             return f"{local_hour:02d}:00"
     elif range_key == "week":
         # Hourly buckets from Monday 00:00 to now
-        start = (now - timedelta(days=now.weekday())).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        total_hours = int((now - start).total_seconds() / 3600) + 1
+        start = (time_range.start.astimezone(timezone.utc) if time_range else
+                 (now - timedelta(days=now.weekday())).replace(
+                     hour=0, minute=0, second=0, microsecond=0))
+        end = time_range.end.astimezone(timezone.utc) if time_range else now
+        total_hours = int((end - start).total_seconds() / 3600) + 1
         n_buckets = total_hours
         day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         def bucket_fn(ts_ms):
@@ -315,6 +459,9 @@ def build_series(
     else:  # month
         # Daily buckets from the first through the last selected month day.
         start, month_end = month_bounds(month)
+        if time_range:
+            start = time_range.start.astimezone(timezone.utc)
+            month_end = time_range.end.astimezone(timezone.utc)
         end = min(month_end, now)
         n_buckets = (
             now.date().day
@@ -625,6 +772,9 @@ class CreditEstimatorApp(App):
     def __init__(self, db: str, budget: float, interval: int,
                  compact_width: int = COMPACT_WIDTH, compact_height: int = COMPACT_HEIGHT,
                  offline: bool = False, month: date | None = None,
+                 selected_range: TimeRange | None = None,
+                 selected_ranges: dict[str, TimeRange] | None = None,
+                 initial_tab: str = "month",
                  session_id: str | None = None):
         super().__init__()
         self.db = db
@@ -634,13 +784,26 @@ class CreditEstimatorApp(App):
         self.compact_height = compact_height
         self.offline = offline
         self.month = month
+        self.selected_range = selected_range
+        self.selected_ranges = selected_ranges or {}
+        self.initial_tab = initial_tab
         self.session_id = session_id
+        if self.selected_ranges:
+            self.BINDINGS = [
+                Binding("q", "quit", "Quit"),
+                Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
+                Binding("r", "refresh", "Refresh now"),
+                Binding("1", "switch_tab('hour')", "Hour"),
+                Binding("2", "switch_tab('today')", "Day"),
+                Binding("3", "switch_tab('week')", "Week"),
+                Binding("4", "switch_tab('month')", "Month"),
+            ]
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Tabs(
             *[Tab(label, id=key) for key, label, _ in RANGES],
-            active="month",
+            active=self.initial_tab,
             id="range-tabs",
         )
         yield UsageSummary("", id="summary")
@@ -695,7 +858,13 @@ class CreditEstimatorApp(App):
                 tab = tabs.query_one(f"#{key}", Tab)
             except Exception:
                 continue
-            if key == "month" and self.month is not None:
+            selected = self.selected_ranges.get(key)
+            if selected is None and key == self.initial_tab:
+                selected = self.selected_range
+            if selected is not None:
+                full_label = selected.label
+                short_label = full_label
+            elif key == "month" and self.month is not None:
                 full_label = month_label(self.month)
                 short_label = full_label
             tab.label = short_label if compact else full_label
@@ -718,10 +887,14 @@ class CreditEstimatorApp(App):
         if range_key == "month" and self.month is not None:
             range_label = f"{range_label} ({month_label(self.month)})"
 
-        start_ms, end_ms = range_bounds(range_key, self.month)
-        rows = filter_session_rows(fetch_rows(self.db, start_ms, end_ms), self.session_id)
+        time_range = self.selected_ranges.get(range_key)
+        if time_range is None and range_key == self.initial_tab:
+            time_range = self.selected_range
+        if time_range is None:
+            time_range = selected_time_range(range_key, self.month if range_key == "month" else None)
+        rows = filter_session_rows(fetch_rows(self.db, time_range), self.session_id)
 
-        labels, cumulative = build_series(rows, range_key, self.month)
+        labels, cumulative = build_series(rows, range_key, self.month, time_range)
         model_rows = summarize_by_model(rows)
         total = cumulative[-1] if cumulative else 0.0
 
@@ -778,7 +951,7 @@ def session_output_rows(
 
 
 def output_json(model_rows: list[tuple[str, dict]], total_credits: float, budget: float,
-                month: date | None = None) -> None:
+                month: date | None = None, time_range: TimeRange | None = None) -> None:
     import json as _json
     rows = []
     for model, m in model_rows:
@@ -795,13 +968,14 @@ def output_json(model_rows: list[tuple[str, dict]], total_credits: float, budget
             "pct_of_budget": round(cred_val / budget * 100, 4) if (m["priced"] and budget) else None,
         })
     print(_json.dumps({
-        "period": month_label(month),
+        "period": time_range.label if time_range else month_label(month),
         "budget": budget,
         "total_credits": round(total_credits, 4),
         "pct_of_budget": round(total_credits / budget * 100, 2) if budget else None,
         "remaining_credits": round(budget - total_credits, 4),
         "pct_remaining": round((budget - total_credits) / budget * 100, 2) if budget else None,
-        "days_until_reset": days_until_budget_reset() if is_current_month(month) else None,
+        "days_until_reset": days_until_budget_reset()
+        if is_current_period_month(time_range, month) else None,
         "models": rows,
         "pricing_source": PRICING_META.get("source"),
         "pricing_retrieved_at": PRICING_META.get("retrieved_at"),
@@ -814,13 +988,13 @@ def output_remaining(total_credits: float, budget: float) -> None:
 
 
 def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budget: float,
-                 month: date | None = None) -> None:
+                  month: date | None = None, time_range: TimeRange | None = None) -> None:
     pct_budget_total = total_credits / budget * 100 if budget else 0
     header = (
         f"{'Model':<26} {'Reqs':>6} {'Input':>12} {'Output':>10} "
         f"{'Cache R':>10} {'Cache W':>10} {'Credits':>10} {'% used':>8} {'% budget':>10}"
     )
-    print(f"\nOpencode -> GitHub Copilot AI credit estimate ({month_label(month)})")
+    print(f"\nOpencode -> GitHub Copilot AI credit estimate ({time_range.label if time_range else month_label(month)})")
     print("=" * len(header))
     print(header)
     print("-" * len(header))
@@ -839,12 +1013,12 @@ def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budge
     print(f"\nBudget: {budget:,.0f} AI credits")
     remaining = budget - total_credits
     pct_remaining = f" ({remaining / budget * 100:.1f}%)" if budget else ""
-    if is_current_month(month):
+    if is_current_period_month(time_range, month):
         days = days_until_budget_reset()
         reset = "resets tomorrow" if days == 1 else f"resets in {days} days"
         reset_suffix = f" — budget {reset}"
     else:
-        reset_suffix = " — historical month"
+        reset_suffix = " — historical period"
     print(f"Remaining: {remaining:,.1f} AI credits{pct_remaining}{reset_suffix}")
     retrieved_at = PRICING_META.get("retrieved_at")
     if retrieved_at:
@@ -854,14 +1028,14 @@ def output_table(model_rows: list[tuple[str, dict]], total_credits: float, budge
 
 def output_sessions_table(
     session_rows: list[tuple[str, dict]], total_credits: float, budget: float,
-    month: date | None = None,
+    month: date | None = None, time_range: TimeRange | None = None,
 ) -> None:
     """Print the current month's estimated credits grouped by OpenCode session."""
     header = (
         f"{'Project':<36} {'Session':<60} {'Reqs':>6} {'Input':>12} {'Output':>10} "
         f"{'Cache R':>10} {'Cache W':>10} {'Credits':>10} {'% used':>8} {'% budget':>10}"
     )
-    print(f"\nOpencode -> GitHub Copilot AI credit estimate by session ({month_label(month)})")
+    print(f"\nOpencode -> GitHub Copilot AI credit estimate by session ({time_range.label if time_range else month_label(month)})")
     print("=" * len(header))
     print(header)
     print("-" * len(header))
@@ -908,18 +1082,19 @@ def output_sessions_table(
 
 def output_sessions_json(
     session_rows: list[tuple[str, dict]], total_credits: float, budget: float,
-    month: date | None = None,
+    month: date | None = None, time_range: TimeRange | None = None,
 ) -> None:
     import json as _json
     print(_json.dumps({
-        "period": month_label(month),
+        "period": time_range.label if time_range else month_label(month),
         "budget": budget,
         "total_credits": round(total_credits, 4),
         "pct_of_budget": round(total_credits / budget * 100, 2) if budget else None,
         "remaining_credits": round(budget - total_credits, 4),
         "pct_remaining": round((budget - total_credits) / budget * 100, 2)
         if budget else None,
-        "days_until_reset": days_until_budget_reset() if is_current_month(month) else None,
+        "days_until_reset": days_until_budget_reset()
+        if is_current_period_month(time_range, month) else None,
         "sessions": session_output_rows(session_rows, total_credits, budget),
         "pricing_source": PRICING_META.get("source"),
         "pricing_retrieved_at": PRICING_META.get("retrieved_at"),
@@ -988,10 +1163,11 @@ def output_prompts_table(prompts: list[dict], mode: str) -> None:
             print()
 
 
-def output_prompts_json(prompts: list[dict], mode: str, month: date | None) -> None:
+def output_prompts_json(prompts: list[dict], mode: str, month: date | None,
+                        time_range: TimeRange | None = None) -> None:
     import json as _json
     print(_json.dumps({
-        "period": month_label(month),
+        "period": time_range.label if time_range else month_label(month),
         "session_id": prompts[0]["session_id"] if prompts else None,
         "session_title": prompts[0]["session_title"] if prompts else None,
         "project": prompts[0]["project_name"] if prompts else None,
@@ -1025,6 +1201,12 @@ def main() -> None:
                      help=f"Monthly AI credit budget (default {DEFAULT_BUDGET:,})")
     ap.add_argument("--month", type=parse_month,
                     help="Calendar month to estimate in YYYY-MM format (default: current month)")
+    ap.add_argument("--week", type=str,
+                    help="ISO week as YYYY-Www, YYYYWww, or week number (default: current week)")
+    ap.add_argument("--day", type=str,
+                    help="Day as YYYY-MM-DD or day number in the last 31 days")
+    ap.add_argument("--hour", type=str,
+                    help="Hour as YYYY-MM-DDTHH, YYYY-MM-DD HH, or hour number in the last 24 hours")
     ap.add_argument("--db", default=DEFAULT_DB,
                     help="Path to opencode's SQLite database")
     ap.add_argument("--interval", type=int, default=DEFAULT_INTERVAL,
@@ -1049,6 +1231,38 @@ def main() -> None:
                     help="Never fetch pricing over the network; use cached/bundled pricing only")
     args = ap.parse_args()
 
+    selectors = [name for name in ("month", "week", "day", "hour") if getattr(args, name) is not None]
+    if len(selectors) > 1:
+        ap.error("--month, --week, --day, and --hour are mutually exclusive")
+    now = _local_now()
+    if args.week is not None:
+        selected_value = parse_week(args.week, now)
+        initial_tab = "week"
+    elif args.day is not None:
+        selected_value = parse_day(args.day, now)
+        initial_tab = "today"
+    elif args.hour is not None:
+        selected_value = parse_hour(args.hour, now)
+        initial_tab = "hour"
+    elif args.month is not None:
+        selected_value = args.month
+        initial_tab = "month"
+    else:
+        selected_value = None
+        initial_tab = "month"
+    selected_range = selected_time_range(
+        "month" if args.month is not None or selected_value is None else initial_tab,
+        selected_value, now,
+    )
+    selected_ranges = (
+        derived_time_ranges(
+            "month" if args.month is not None else initial_tab,
+            selected_value if selected_value is not None else now.date().replace(day=1),
+            now,
+        )
+        if selectors else {}
+    )
+
     if args.prompts and not args.session_id:
         ap.error("--prompts requires --session SESSION_ID")
     if args.prompts and args.sessions:
@@ -1062,16 +1276,17 @@ def main() -> None:
         PRICING, PRICING_META = pricing_source.load_pricing(refresh=True)
 
     if args.output or args.remaining or args.sessions or args.prompts:
-        start_ms, end_ms = range_bounds("month", args.month)
+        time_range = selected_range
+        output_range = time_range if args.week or args.day or args.hour else None
         rows = filter_session_rows(
-            fetch_rows(args.db, start_ms, end_ms), args.session_id
+            fetch_rows(args.db, time_range), args.session_id
         )
         if args.prompts:
             prompts = attach_prompt_usage(
-                fetch_prompts(args.db, args.session_id, start_ms, end_ms), rows
+                fetch_prompts(args.db, args.session_id, time_range), rows
             )
             if args.output == "json":
-                output_prompts_json(prompts, args.prompts, args.month)
+                output_prompts_json(prompts, args.prompts, args.month, output_range)
             else:
                 output_prompts_table(prompts, args.prompts)
             return
@@ -1081,19 +1296,21 @@ def main() -> None:
         if args.remaining:
             output_remaining(total, args.budget)
         elif args.sessions and args.output == "json":
-            output_sessions_json(session_rows, total, args.budget, args.month)
+            output_sessions_json(session_rows, total, args.budget, args.month, output_range)
         elif args.sessions:
-            output_sessions_table(session_rows, total, args.budget, args.month)
+            output_sessions_table(session_rows, total, args.budget, args.month, output_range)
         elif args.output == "json":
-            output_json(model_rows, total, args.budget, args.month)
+            output_json(model_rows, total, args.budget, args.month, output_range)
         else:
-            output_table(model_rows, total, args.budget, args.month)
+            output_table(model_rows, total, args.budget, args.month, output_range)
         return
 
     app = CreditEstimatorApp(db=args.db, budget=args.budget, interval=args.interval,
-                             compact_width=args.compact_width, compact_height=args.compact_height,
-                             offline=args.offline, month=args.month,
-                             session_id=args.session_id)
+                              compact_width=args.compact_width, compact_height=args.compact_height,
+                              offline=args.offline, month=args.month,
+                              selected_range=selected_range, initial_tab=initial_tab,
+                              selected_ranges=selected_ranges,
+                              session_id=args.session_id)
     app.run()
 
 

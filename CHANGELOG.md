@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `--session SESSION_ID` to filter the TUI and non-interactive output to one OpenCode session.
 - Added `--prompts[=short|long|full]` to print user prompts and their usage data for a selected session.
 - Long and full prompt output now places credits on a separate indented line for easier scanning.
+- Added `--week`, `--day`, and `--hour` selectors for ISO and recent bare-number time ranges in the TUI, table, JSON, session, and prompt output modes.
+- Selected week, day, and hour ranges now replace the corresponding TUI tab label with the exact selected period.
+- TUI tabs now derive their selected hour, day, week, and month from any supplied time selector.
 
 ## [0.4.0] - 2026-09-17
 

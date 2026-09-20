@@ -53,6 +53,11 @@ occe --budget 30000
 # Estimate a specific calendar month
 occe --month 2026-08 --output table
 
+# Estimate an ISO week, day, or local hour
+occe --week 2026-W38 --output table
+occe --day 2026-09-20 --output json
+occe --hour "2026-08-20 22" --output table
+
 # Point to a non-default database location
 occe --db /path/to/opencode.db
 
@@ -100,6 +105,14 @@ session report. It defaults to the current month. In the TUI, the selected
 month applies to the **This month** tab; the other tabs continue to show their
 rolling/current time ranges.
 
+Use `--week` to select an ISO week (`2026-W38`, `2026W38`, or bare `38`, which
+uses the current year), `--day` to select an ISO date or the most recent day of
+month in the last 31 days, and `--hour` to select a local ISO date/hour
+(`2026-08-20T22` or `2026-08-20 22`) or the most recent matching hour in the
+last 24 hours. These selectors are mutually exclusive with `--month` and each
+other. In the TUI they select and open the corresponding Week, Today, or Last
+hour tab.
+
 Use `--session SESSION_ID` to limit the TUI or any non-interactive output to a
 single OpenCode session. This can be combined with `--month` to inspect that
 session's daily credit growth over a selected month, or with `--sessions` to
@@ -134,6 +147,9 @@ occe --remaining
 |---|---|---|
 | `--budget` | `50000` | Monthly AI credit budget to compare against |
 | `--month` | current month | Calendar month to estimate in `YYYY-MM` format |
+| `--week` | — | ISO week (`YYYY-Www`, `YYYYWww`, or bare week number) |
+| `--day` | — | ISO date or recent day-of-month number |
+| `--hour` | — | Local ISO date/hour or recent hour number |
 | `--db` | `~/.local/share/opencode/opencode.db` | Path to the opencode SQLite database |
 | `--interval` | `30` | Auto-refresh interval in seconds (TUI only) |
 | `--compact-width` | `80` | Terminal width (columns) below which compact mode activates |

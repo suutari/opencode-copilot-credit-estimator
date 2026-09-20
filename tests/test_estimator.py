@@ -119,6 +119,60 @@ def test_parse_month_rejects_invalid_values():
         estimator.parse_month("2024-13")
 
 
+def test_parse_week_accepts_iso_and_bare_week():
+    now = datetime(2026, 9, 20, 22, tzinfo=timezone.utc)
+    assert estimator.parse_week("2026-W38", now) == date(2026, 9, 14)
+    assert estimator.parse_week("2026W38", now) == date(2026, 9, 14)
+    assert estimator.parse_week("38", now) == date(2026, 9, 14)
+
+
+def test_parse_day_bare_number_uses_latest_past_date():
+    now = datetime(2026, 9, 20, 22, tzinfo=timezone.utc)
+    assert estimator.parse_day("20", now) == date(2026, 9, 20)
+    assert estimator.parse_day("21", now) == date(2026, 8, 21)
+
+
+def test_parse_hour_accepts_local_iso_and_bare_hour():
+    now = datetime(2026, 9, 20, 22, 15, tzinfo=timezone.utc)
+    assert estimator.parse_hour("2026-08-20T22", now).replace(tzinfo=None) == datetime(2026, 8, 20, 22)
+    assert estimator.parse_hour("2026-08-20 22", now).replace(tzinfo=None) == datetime(2026, 8, 20, 22)
+    assert estimator.parse_hour("22", now).replace(tzinfo=None) == datetime(2026, 9, 20, 22)
+    assert estimator.parse_hour("23", now).replace(tzinfo=None) == datetime(2026, 9, 19, 23)
+
+
+def test_selected_time_range_has_timestamp_bounds():
+    now = datetime(2026, 9, 20, 22, 15, tzinfo=timezone.utc)
+    period = estimator.selected_time_range("day", date(2026, 9, 20), now)
+    assert period.start.replace(tzinfo=None) == datetime(2026, 9, 20)
+    assert period.end == now
+    assert period.label == "2026-09-20"
+
+
+def test_derived_ranges_follow_hour_anchor():
+    now = datetime(2026, 9, 20, 22, 15, tzinfo=timezone.utc)
+    ranges = estimator.derived_time_ranges(
+        "hour", datetime(2026, 9, 10, 19, tzinfo=timezone.utc), now
+    )
+    assert ranges["hour"].label == "2026-09-10T19"
+    assert ranges["today"].label == "2026-09-10"
+    assert ranges["week"].label == "2026-W37"
+    assert ranges["month"].label == "2026-09"
+
+
+def test_derived_ranges_use_noon_wednesday_and_fifteenth_fallbacks():
+    now = datetime(2026, 9, 20, 22, 15, tzinfo=timezone.utc)
+    day_ranges = estimator.derived_time_ranges("day", date(2026, 9, 10), now)
+    assert day_ranges["hour"].label == "2026-09-10T12"
+
+    week_ranges = estimator.derived_time_ranges("week", date(2026, 9, 7), now)
+    assert week_ranges["today"].label == "2026-09-09"
+    assert week_ranges["hour"].label == "2026-09-09T12"
+
+    month_ranges = estimator.derived_time_ranges("month", date(2026, 9, 1), now)
+    assert month_ranges["today"].label == "2026-09-15"
+    assert month_ranges["hour"].label == "2026-09-15T12"
+
+
 def test_month_bounds_handles_leap_year():
     start, end = estimator.month_bounds(date(2024, 2, 1))
     assert start == datetime(2024, 2, 1, tzinfo=timezone.utc)
@@ -153,6 +207,68 @@ async def test_selected_month_is_shown_on_month_tab():
     async with app.run_test(size=(160, 50)):
         tab = app.query_one("#month")
         assert str(tab.label) == "2024-02"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("selected_range", "initial_tab", "expected"),
+    [
+        (estimator.TimeRange(
+            datetime(2026, 9, 14, tzinfo=timezone.utc),
+            datetime(2026, 9, 21, tzinfo=timezone.utc),
+            "2026-W38",
+        ), "week", "2026-W38"),
+        (estimator.TimeRange(
+            datetime(2026, 9, 20, tzinfo=timezone.utc),
+            datetime(2026, 9, 21, tzinfo=timezone.utc),
+            "2026-09-20",
+        ), "today", "2026-09-20"),
+        (estimator.TimeRange(
+            datetime(2026, 9, 20, 22, tzinfo=timezone.utc),
+            datetime(2026, 9, 20, 23, tzinfo=timezone.utc),
+            "2026-09-20T22",
+        ), "hour", "2026-09-20T22"),
+    ],
+)
+async def test_selected_period_is_shown_on_corresponding_tab(
+    selected_range, initial_tab, expected
+):
+    app = CreditEstimatorApp(
+        db="/nonexistent/opencode.db",
+        budget=50_000,
+        interval=3600,
+        selected_range=selected_range,
+        initial_tab=initial_tab,
+    )
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        tab = app.query_one(f"#{initial_tab}")
+        assert str(tab.label) == expected
+
+
+def test_time_selector_uses_generic_help_labels():
+    app = CreditEstimatorApp(
+        db="/nonexistent/opencode.db",
+        budget=50_000,
+        interval=3600,
+        selected_ranges={"hour": estimator.TimeRange(
+            datetime(2026, 9, 20, 22, tzinfo=timezone.utc),
+            datetime(2026, 9, 20, 23, tzinfo=timezone.utc),
+            "2026-09-20T22",
+        )},
+    )
+    labels = {binding.key: binding.description for binding in app.BINDINGS}
+    assert labels["1"] == "Hour"
+    assert labels["2"] == "Day"
+    assert labels["3"] == "Week"
+    assert labels["4"] == "Month"
+
+
+def test_current_time_uses_current_help_labels():
+    app = make_app()
+    labels = {binding.key: binding.description for binding in app.BINDINGS}
+    assert labels["1"] == "Last hour"
+    assert labels["2"] == "Today"
 
 
 def test_filter_session_rows():
