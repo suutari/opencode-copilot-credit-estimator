@@ -218,6 +218,7 @@ def test_summarize_by_session_groups_requests(monkeypatch):
             "ts_ms": 200,
             "session_id": "session-a",
             "session_title": "First task",
+            "project_name": "Project A",
             "model": "test-model",
             "input": 1_000_000,
             "output": 100_000,
@@ -229,6 +230,7 @@ def test_summarize_by_session_groups_requests(monkeypatch):
             "ts_ms": 100,
             "session_id": "session-a",
             "session_title": "First task",
+            "project_name": "Project A",
             "model": "test-model",
             "input": 500_000,
             "output": 0,
@@ -240,6 +242,7 @@ def test_summarize_by_session_groups_requests(monkeypatch):
             "ts_ms": 300,
             "session_id": "session-b",
             "session_title": "Second task",
+            "project_name": "Project B",
             "model": "test-model",
             "input": 1_000_000,
             "output": 0,
@@ -254,6 +257,7 @@ def test_summarize_by_session_groups_requests(monkeypatch):
     assert [session_id for session_id, _ in sessions] == ["session-a", "session-b"]
     session = sessions[0][1]
     assert session["title"] == "First task"
+    assert session["project"] == "Project A"
     assert session["requests"] == 2
     assert session["input"] == 1_500_000
     assert session["output"] == 200_000
@@ -269,6 +273,7 @@ def test_output_sessions_shows_session_breakdown(monkeypatch, capsys):
             "session-a",
             {
                 "title": "A task",
+                "project": "Project A",
                 "requests": 2,
                 "input": 1_000,
                 "output": 500,
@@ -287,6 +292,7 @@ def test_output_sessions_shows_session_breakdown(monkeypatch, capsys):
 
     assert "estimate by session" in out
     assert "A task" in out
+    assert "Project A" in out
     assert "session-a" in out
     assert "125.0" in out
 
@@ -300,6 +306,7 @@ def test_output_sessions_json_includes_sessions(monkeypatch, capsys):
             "session-a",
             {
                 "title": "A task",
+                "project": "Project A",
                 "requests": 1,
                 "input": 10,
                 "output": 5,
@@ -318,6 +325,7 @@ def test_output_sessions_json_includes_sessions(monkeypatch, capsys):
 
     assert data["sessions"][0]["session_id"] == "session-a"
     assert data["sessions"][0]["title"] == "A task"
+    assert data["sessions"][0]["project"] == "Project A"
     assert data["sessions"][0]["credits"] == 1.0
 
 

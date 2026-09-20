@@ -120,8 +120,8 @@ def range_bounds(range_key: str, month: date | None = None) -> tuple[int, int]:
 def fetch_rows(db_path: str, start_ms: int, end_ms: int) -> list[dict]:
     """
     Return one dict per assistant message within [start_ms, end_ms).
-    Each dict has: ts_ms, session_id, session_title, model, input, output,
-    reasoning, cache_read, cache_write.
+    Each dict has: ts_ms, session_id, session_title, project_name, model, input,
+    output, reasoning, cache_read, cache_write.
     """
     if not os.path.exists(db_path):
         return []
@@ -134,6 +134,7 @@ def fetch_rows(db_path: str, start_ms: int, end_ms: int) -> list[dict]:
             m.time_created AS ts_ms,
             m.session_id AS session_id,
             COALESCE(s.title, '') AS session_title,
+            COALESCE(p.name, p.worktree, '') AS project_name,
             json_extract(m.data, '$.modelID')            AS model,
             COALESCE(json_extract(m.data, '$.tokens.input'),       0) AS input,
             COALESCE(json_extract(m.data, '$.tokens.output'),      0) AS output,
@@ -142,6 +143,7 @@ def fetch_rows(db_path: str, start_ms: int, end_ms: int) -> list[dict]:
             COALESCE(json_extract(m.data, '$.tokens.cache.write'), 0) AS cache_write
         FROM message AS m
         LEFT JOIN session AS s ON s.id = m.session_id
+        LEFT JOIN project AS p ON p.id = s.project_id
         WHERE json_extract(m.data, '$.role')       = 'assistant'
           AND json_extract(m.data, '$.providerID') = 'github-copilot'
           AND m.time_created >= ? AND m.time_created < ?
@@ -305,6 +307,7 @@ def summarize_by_session(rows: list[dict]) -> list[tuple[str, dict]]:
             session_id,
             {
                 "title": r.get("session_title") or "Untitled session",
+                "project": r.get("project_name") or "Unknown project",
                 "requests": 0,
                 "input": 0,
                 "output": 0,
@@ -688,6 +691,7 @@ def session_output_rows(
         cred_val = credits(session["usd"])
         rows.append({
             "session_id": session_id,
+            "project": session["project"],
             "title": session["title"],
             "requests": session["requests"],
             "input_tokens": session["input"],
@@ -786,7 +790,7 @@ def output_sessions_table(
 ) -> None:
     """Print the current month's estimated credits grouped by OpenCode session."""
     header = (
-        f"{'Session':<36} {'Reqs':>6} {'Input':>12} {'Output':>10} "
+        f"{'Project':<36} {'Session':<60} {'Reqs':>6} {'Input':>12} {'Output':>10} "
         f"{'Cache R':>10} {'Cache W':>10} {'Credits':>10} {'% used':>8} {'% budget':>10}"
     )
     print(f"\nOpencode -> GitHub Copilot AI credit estimate by session ({month_label(month)})")
@@ -804,19 +808,22 @@ def output_sessions_table(
             f"{cred_val / budget * 100:.2f}%"
             if (session["priced"] and budget) else "?"
         )
+        project = session.get("project") or "Unknown project"
+        if len(project) > 34:
+            project = project[:33] + "..."
         label = session["title"] or "Untitled session"
-        if len(label) > 34:
-            label = label[:31] + "..."
+        if len(label) > 58:
+            label = label[:57] + "..."
         print(
-            f"{label:<36} {session['requests']:>6,} {session['input']:>12,} "
+            f"{project:<36} {label:<60} {session['requests']:>6,} {session['input']:>12,} "
             f"{session['output']:>10,} {session['cache_read']:>10,} "
             f"{session['cache_write']:>10,} {cred:>10} {pct_used:>8} {pct_budget:>10}"
         )
-        print(f"  {session_id}")
+        print(f"{'':36}   {session_id}")
     print("-" * len(header))
     pct_budget_total = total_credits / budget * 100 if budget else 0
     print(
-        f"{'TOTAL':<36} {'':>6} {'':>12} {'':>10} {'':>10} {'':>10} "
+        f"{'TOTAL':<36} {'':<60} {'':>6} {'':>12} {'':>10} {'':>10} {'':>10} "
         f"{total_credits:>10,.1f} {'100.0%':>8} {pct_budget_total:>9.2f}%"
     )
     print(f"\nBudget: {budget:,.0f} AI credits")
