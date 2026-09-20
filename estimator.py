@@ -638,6 +638,11 @@ class ModelTable(DataTable):
         "Credits", "% of used credits", "% of budget",
     )
     COMPACT_COLUMNS = ("Model", "Reqs", "% budget")
+    SESSION_COLUMNS = (
+        "Project", "Session", "Reqs", "Input tok", "Output tok", "Cache R", "Cache W",
+        "Credits", "% of used credits", "% of budget",
+    )
+    SESSION_COMPACT_COLUMNS = ("Session", "Reqs", "% budget")
     COMPACT_COLUMN_WIDTHS = (15, 7, 8)
 
     MAX_MODEL_NAME_LEN = 24
@@ -648,14 +653,20 @@ class ModelTable(DataTable):
         self._model_rows: list[tuple[str, dict]] = []
         self._total_credits: float = 0.0
         self._budget: float = DEFAULT_BUDGET
+        self._view = "models"
+        self._session_rows: list[tuple[str, dict]] = []
 
     def on_mount(self) -> None:
         self._rebuild_columns()
 
     def _rebuild_columns(self) -> None:
         self.clear(columns=True)
-        columns = self.COMPACT_COLUMNS if self._compact else self.FULL_COLUMNS
-        widths = self.COMPACT_COLUMN_WIDTHS if self._compact else (None,) * len(columns)
+        if self._view == "sessions":
+            columns = self.SESSION_COMPACT_COLUMNS if self._compact else self.SESSION_COLUMNS
+            widths = self.COMPACT_COLUMN_WIDTHS if self._compact else (None,) * len(columns)
+        else:
+            columns = self.COMPACT_COLUMNS if self._compact else self.FULL_COLUMNS
+            widths = self.COMPACT_COLUMN_WIDTHS if self._compact else (None,) * len(columns)
         for col, width in zip(columns, widths):
             self.add_column(col, key=col, width=width)
 
@@ -664,6 +675,17 @@ class ModelTable(DataTable):
         if compact == self._compact:
             return
         self._compact = compact
+        self._rebuild_columns()
+        self._render_rows()
+
+    def show_models(self) -> None:
+        self._view = "models"
+        self._rebuild_columns()
+        self._render_rows()
+
+    def show_sessions(self, session_rows: list[tuple[str, dict]]) -> None:
+        self._view = "sessions"
+        self._session_rows = session_rows
         self._rebuild_columns()
         self._render_rows()
 
@@ -686,6 +708,9 @@ class ModelTable(DataTable):
 
     def _render_rows(self) -> None:
         self.clear()
+        if self._view == "sessions":
+            self._render_session_rows()
+            return
         for model, m in self._model_rows:
             cred_val = credits(m["usd"])
             cred = f"{cred_val:,.1f}" if m["priced"] else "?"
@@ -711,6 +736,30 @@ class ModelTable(DataTable):
                     cred,
                     pct_used,
                     pct_budget,
+                )
+
+    def _render_session_rows(self) -> None:
+        for session_id, session in self._session_rows:
+            cred_val = credits(session["usd"])
+            cred = f"{cred_val:,.1f}" if session["priced"] else "?"
+            pct_used = (
+                f"{cred_val / self._total_credits * 100:.1f}%"
+                if (session["priced"] and self._total_credits) else "?"
+            )
+            pct_budget = (
+                f"{cred_val / self._budget * 100:.2f}%"
+                if (session["priced"] and self._budget) else "?"
+            )
+            project = self._truncate(session.get("project") or "Unknown project")
+            title = self._truncate(session.get("title") or session_id)
+            if self._compact:
+                self.add_row(title, f"{session['requests']:,}", pct_budget)
+            else:
+                self.add_row(
+                    project, title, f"{session['requests']:,}",
+                    f"{session['input']:,}", f"{session['output']:,}",
+                    f"{session['cache_read']:,}", f"{session['cache_write']:,}",
+                    cred, pct_used, pct_budget,
                 )
 
 
@@ -760,6 +809,8 @@ class CreditEstimatorApp(App):
         Binding("q", "quit", "Quit"),
         Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
         Binding("r", "refresh", "Refresh now"),
+        Binding("s", "show_sessions", "Sessions"),
+        Binding("m", "show_models", "Models"),
         Binding("up,n", "next_period", "Next", key_display="↑/n"),
         Binding("down,p", "previous_period", "Previous", key_display="↓/p"),
         Binding("1", "switch_tab('hour')", "Hour"),
@@ -790,11 +841,14 @@ class CreditEstimatorApp(App):
         self.selected_ranges = selected_ranges or {}
         self.initial_tab = initial_tab
         self.session_id = session_id
+        self._session_rows: list[tuple[str, dict]] = []
         if self.selected_ranges:
             self.BINDINGS = [
                 Binding("q", "quit", "Quit"),
                 Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
                 Binding("r", "refresh", "Refresh now"),
+                Binding("s", "show_sessions", "Sessions"),
+                Binding("m", "show_models", "Models"),
                 Binding("up,n", "next_period", "Next", key_display="↑/n"),
                 Binding("down,p", "previous_period", "Previous", key_display="↓/p"),
                 Binding("1", "switch_tab('hour')", "Hour"),
@@ -890,6 +944,17 @@ class CreditEstimatorApp(App):
             self._update_tab_labels(self.compact)
             self.refresh_data()
 
+    def action_show_sessions(self) -> None:
+        self._show_session_table()
+
+    def action_show_models(self) -> None:
+        table = self.query_one("#table", ModelTable)
+        table.show_models()
+
+    def _show_session_table(self) -> None:
+        table = self.query_one("#table", ModelTable)
+        table.show_sessions(self._session_rows)
+
     def action_next_period(self) -> None:
         self._move_period(1)
 
@@ -953,6 +1018,7 @@ class CreditEstimatorApp(App):
 
         labels, cumulative = build_series(rows, range_key, self.month, time_range)
         model_rows = summarize_by_model(rows)
+        self._session_rows = summarize_by_session(rows)
         total = cumulative[-1] if cumulative else 0.0
 
         chart = self.query_one("#chart", CreditChart)
@@ -960,6 +1026,8 @@ class CreditEstimatorApp(App):
 
         table = self.query_one("#table", ModelTable)
         table.update_data(model_rows, total, self.budget)
+        if table._view == "sessions":
+            table.show_sessions(self._session_rows)
 
         summary = self.query_one("#summary", UsageSummary)
         summary.update_summary(total, self.budget, self.month)

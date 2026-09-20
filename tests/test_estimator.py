@@ -290,6 +290,31 @@ def test_navigation_help_bindings_are_available():
     assert bindings["previous_period"].key_display == "↓/p"
 
 
+@pytest.mark.asyncio
+async def test_model_table_switches_between_model_and_session_views():
+    app = make_app()
+    async with app.run_test(size=(160, 50)):
+        table = app.query_one("#table", ModelTable)
+        table.update_data([], 0.0, 50_000)
+        table.show_sessions([(
+            "session-a",
+            {
+                "project": "Project A",
+                "title": "A task",
+                "requests": 1,
+                "input": 10,
+                "output": 5,
+                "cache_read": 0,
+                "cache_write": 0,
+                "usd": 0.01,
+                "priced": True,
+            },
+        )])
+        assert tuple(str(column.label) for column in table.columns.values()) == ModelTable.SESSION_COLUMNS
+        table.show_models()
+        assert tuple(str(column.label) for column in table.columns.values()) == ModelTable.FULL_COLUMNS
+
+
 def test_navigation_moves_all_ranges_from_active_day():
     app = CreditEstimatorApp(
         db="/nonexistent/opencode.db",

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Selected week, day, and hour ranges now replace the corresponding TUI tab label with the exact selected period.
 - TUI tabs now derive their selected hour, day, week, and month from any supplied time selector.
 - Added TUI navigation and live refresh controls for browsing selected time ranges.
+- Added `S`/`M` TUI bindings to switch between session and model breakdowns.
 
 ## [0.4.0] - 2026-09-17
 
