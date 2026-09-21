@@ -28,7 +28,7 @@ def populated_rows(requests=1):
 @pytest.mark.asyncio
 async def test_normal_size_shows_summary_chart_and_full_table():
     app = make_app()
-    async with app.run_test(size=(160, 50)) as pilot:
+    async with app.run_test(size=(160, 50)):
         assert app.compact is False
 
         summary = app.query_one("#summary", UsageSummary)
@@ -328,7 +328,7 @@ async def test_selected_month_is_shown_on_month_tab():
         interval=3600,
         month=date(2024, 2, 1),
     )
-    async with app.run_test(size=(160, 50)):
+    async with app.run_test(size=(160, 50)) as pilot:
         tab = app.query_one("#month")
         assert str(tab.label) == "2024-02"
 
@@ -414,10 +414,17 @@ def test_navigation_help_bindings_are_available():
     assert bindings["previous_period"].key_display == "↓/p"
 
 
+def test_prompts_help_binding_is_available():
+    app = make_app()
+    bindings = {binding.action: binding for binding in app.BINDINGS}
+    assert bindings["show_prompts"].key == "o"
+    assert bindings["show_prompts"].description == "Prompts"
+
+
 @pytest.mark.asyncio
 async def test_model_table_switches_between_model_and_session_views():
     app = make_app()
-    async with app.run_test(size=(160, 50)):
+    async with app.run_test(size=(160, 50)) as pilot:
         table = app.query_one("#table", ModelTable)
         table.update_data([], 0.0, 50_000)
         table.show_sessions([(
@@ -437,6 +444,36 @@ async def test_model_table_switches_between_model_and_session_views():
         assert tuple(str(column.label) for column in table.columns.values()) == ModelTable.SESSION_COLUMNS
         table.show_models()
         assert tuple(str(column.label) for column in table.columns.values()) == ModelTable.FULL_COLUMNS
+
+
+@pytest.mark.asyncio
+async def test_model_table_shows_prompts_with_initial_content():
+    app = make_app()
+    async with app.run_test(size=(160, 50)) as pilot:
+        table = app.query_one("#table", ModelTable)
+        table.show_prompts([{
+            "ts_ms": 100,
+            "project_name": "A very long project name",
+            "prompt": "First line with more content in the flexible prompt column\nmore detail",
+            "requests": 2,
+            "input": 10,
+            "output": 5,
+            "cache_read": 1,
+            "cache_write": 0,
+            "credits": 1.5,
+        }])
+        assert tuple(str(column.label) for column in table.columns.values()) == ModelTable.PROMPT_COLUMNS
+        assert table.get_cell_at((0, 1)) == "A very long project name"
+        assert table.get_cell_at((0, 2)) == "First line with more content in the flexible prompt column more detail"
+        assert table.get_cell_at((0, 3)) == "2"
+        assert table.get_cell_at((0, 8)) == "1.5"
+        await pilot.pause()
+        assert table.max_scroll_x == 0
+        assert table.columns["Prompt"].get_render_width(table) == table.content_region.width - sum(
+            column.get_render_width(table)
+            for key, column in table.columns.items()
+            if key != "Prompt"
+        )
 
 
 def test_navigation_moves_all_ranges_from_active_day():
@@ -690,6 +727,26 @@ def test_attach_prompt_usage_assigns_requests_to_prompts(monkeypatch):
     assert prompts[1]["requests"] == 1
     assert prompts[0]["input"] == 1_000
     assert prompts[1]["input"] == 2_000
+
+
+def test_attach_prompt_usage_does_not_cross_session_boundaries(monkeypatch):
+    monkeypatch.setattr(estimator, "PRICING", {
+        "test-model": (1.0, 0.5, None, 2.0),
+    })
+    prompts = [
+        {"ts_ms": 100, "session_id": "session-a", "prompt": "first"},
+        {"ts_ms": 100, "session_id": "session-b", "prompt": "other"},
+    ]
+    rows = [{
+        "ts_ms": 200, "session_id": "session-a", "model": "test-model",
+        "input": 1_000, "output": 200, "reasoning": 0,
+        "cache_read": 0, "cache_write": 0,
+    }]
+
+    estimator.attach_prompt_usage(prompts, rows)
+
+    assert prompts[0]["requests"] == 1
+    assert prompts[1]["requests"] == 0
 
 
 def test_output_prompts_short_has_header_and_inline_data(capsys):

@@ -33,6 +33,7 @@ from itertools import accumulate
 from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.geometry import Size
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Header, Label, Tab, Tabs
@@ -304,8 +305,8 @@ def filter_session_rows(rows: list[dict], session_id: str | None) -> list[dict]:
     return [row for row in rows if row.get("session_id") == session_id]
 
 
-def fetch_prompts(db_path: str, session_id: str, time_range: TimeRange) -> list[dict]:
-    """Return user prompts and their metadata for one session and time range."""
+def fetch_prompts(db_path: str, session_id: str | None, time_range: TimeRange) -> list[dict]:
+    """Return user prompts and their metadata for a time range."""
     if not os.path.exists(db_path):
         return []
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -329,13 +330,13 @@ def fetch_prompts(db_path: str, session_id: str, time_range: TimeRange) -> list[
         LEFT JOIN project AS p ON p.id = s.project_id
         LEFT JOIN part AS pt ON pt.message_id = m.id
             AND json_extract(pt.data, '$.type') = 'text'
-        WHERE m.session_id = ?
+        WHERE (? IS NULL OR m.session_id = ?)
           AND json_extract(m.data, '$.role') = 'user'
           AND m.time_created >= ? AND m.time_created < ?
         GROUP BY m.id, m.time_created, m.session_id, s.title, p.name, p.worktree
         ORDER BY m.time_created, m.id
         """,
-        (session_id, time_range.start_ms, time_range.end_ms),
+        (session_id, session_id, time_range.start_ms, time_range.end_ms),
     )
     rows = [dict(r) for r in cur.fetchall()]
     con.close()
@@ -355,7 +356,11 @@ def attach_prompt_usage(prompts: list[dict], rows: list[dict]) -> list[dict]:
         })
     for row in rows:
         target = next(
-            (prompt for prompt in reversed(prompts) if prompt["ts_ms"] <= row["ts_ms"]),
+            (
+                prompt for prompt in reversed(prompts)
+                if prompt.get("session_id") == row.get("session_id")
+                and prompt["ts_ms"] <= row["ts_ms"]
+            ),
             None,
         )
         if target is None:
@@ -652,6 +657,12 @@ class ModelTable(DataTable):
         "Credits", "% of used credits", "% of budget",
     )
     SESSION_COMPACT_COLUMNS = ("Session", "Reqs", "% budget")
+    PROMPT_COLUMNS = (
+        "Timestamp", "Project", "Prompt", "Reqs", "Input tok", "Output tok", "Cache R", "Cache W",
+        "Credits",
+    )
+    PROMPT_COMPACT_COLUMNS = ("Timestamp", "Project", "Prompt", "Reqs", "Credits")
+    PROMPT_PROJECT_WIDTH = 18
     COMPACT_COLUMN_WIDTHS = (15, 7, 8)
 
     MAX_MODEL_NAME_LEN = 24
@@ -664,20 +675,61 @@ class ModelTable(DataTable):
         self._budget: float = DEFAULT_BUDGET
         self._view = "models"
         self._session_rows: list[tuple[str, dict]] = []
+        self._prompt_rows: list[dict] = []
 
     def on_mount(self) -> None:
         self._rebuild_columns()
+        self.call_after_refresh(self._fit_prompt_column)
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.call_after_refresh(self._fit_prompt_column)
+
+    def on_idle(self, event: events.Idle) -> None:
+        self._fit_prompt_column()
+
+    def _update_dimensions(self, new_rows):
+        super()._update_dimensions(new_rows)
+        if self._view == "prompts":
+            self._fit_prompt_column()
+            self.virtual_size = Size(
+                sum(column.get_render_width(self) for column in self.columns.values()),
+                self.virtual_size.height,
+            )
 
     def _rebuild_columns(self) -> None:
         self.clear(columns=True)
         if self._view == "sessions":
             columns = self.SESSION_COMPACT_COLUMNS if self._compact else self.SESSION_COLUMNS
             widths = self.COMPACT_COLUMN_WIDTHS if self._compact else (None,) * len(columns)
+        elif self._view == "prompts":
+            columns = self.PROMPT_COMPACT_COLUMNS if self._compact else self.PROMPT_COLUMNS
+            # The prompt is the only unbounded field. DataTable gives the other
+            # columns their content widths and the prompt receives the rest.
+            widths = (None,) * len(columns)
         else:
             columns = self.COMPACT_COLUMNS if self._compact else self.FULL_COLUMNS
             widths = self.COMPACT_COLUMN_WIDTHS if self._compact else (None,) * len(columns)
         for col, width in zip(columns, widths):
+            if self._view == "prompts" and col == "Prompt":
+                width = 1
+            elif self._view == "prompts" and col == "Project":
+                width = self.PROMPT_PROJECT_WIDTH
             self.add_column(col, key=col, width=width)
+        self.call_after_refresh(self._fit_prompt_column)
+
+    def _fit_prompt_column(self) -> None:
+        if self._view != "prompts" or "Prompt" not in self.columns:
+            return
+        self.columns["Prompt"].auto_width = False
+        other_width = sum(
+            column.get_render_width(self)
+            for key, column in self.columns.items()
+            if key != "Prompt"
+        )
+        prompt_padding = 2 * self.cell_padding
+        self.columns["Prompt"].width = max(
+            1, self.content_region.width - other_width - prompt_padding
+        )
 
     def set_compact(self, compact: bool) -> None:
         """Switch column schema. No-op if already in the requested mode."""
@@ -695,6 +747,12 @@ class ModelTable(DataTable):
     def show_sessions(self, session_rows: list[tuple[str, dict]]) -> None:
         self._view = "sessions"
         self._session_rows = session_rows
+        self._rebuild_columns()
+        self._render_rows()
+
+    def show_prompts(self, prompt_rows: list[dict]) -> None:
+        self._view = "prompts"
+        self._prompt_rows = prompt_rows
         self._rebuild_columns()
         self._render_rows()
 
@@ -719,6 +777,9 @@ class ModelTable(DataTable):
         self.clear()
         if self._view == "sessions":
             self._render_session_rows()
+            return
+        if self._view == "prompts":
+            self._render_prompt_rows()
             return
         for model, m in self._model_rows:
             cred_val = credits(m["usd"])
@@ -771,6 +832,28 @@ class ModelTable(DataTable):
                     cred, pct_used, pct_budget,
                 )
 
+    def _render_prompt_rows(self) -> None:
+        for prompt in self._prompt_rows:
+            timestamp = prompt_timestamp(prompt)
+            project = self._truncate(prompt.get("project_name") or "Unknown project")
+            text = " ".join(prompt.get("prompt", "").split())
+            credits_value = prompt["credits"]
+            credits_text = f"{credits_value:,.1f}"
+            if self._compact:
+                self.add_row(timestamp, project, text, f"{prompt['requests']:,}", credits_text)
+            else:
+                self.add_row(
+                    timestamp,
+                    project,
+                    text,
+                    f"{prompt['requests']:,}",
+                    f"{prompt['input']:,}",
+                    f"{prompt['output']:,}",
+                    f"{prompt['cache_read']:,}",
+                    f"{prompt['cache_write']:,}",
+                    credits_text,
+                )
+
 
 class UsageSummary(Label):
     """Always-visible summary of credits used, total budget, and percentage.
@@ -808,7 +891,7 @@ class CreditEstimatorApp(App):
     UsageSummary { width: 100%; height: auto; padding: 0 1; text-style: bold; }
     #main { height: 1fr; }
     CreditChart { height: 65%; border: round $primary; }
-    ModelTable { height: 1fr; border: round $surface-lighten-2; }
+    ModelTable { height: 1fr; border: round $surface-lighten-2; overflow-x: hidden; }
     StatusBar { dock: bottom; height: 1; color: $text-muted; padding: 0 1; }
     #main.compact CreditChart { display: none; }
     #main.compact ModelTable { height: 1fr; }
@@ -820,6 +903,7 @@ class CreditEstimatorApp(App):
         Binding("r", "refresh", "Refresh now"),
         Binding("s", "show_sessions", "Sessions"),
         Binding("m", "show_models", "Models"),
+        Binding("o", "show_prompts", "Prompts"),
         Binding("up,n", "next_period", "Next", key_display="↑/n"),
         Binding("down,p", "previous_period", "Previous", key_display="↓/p"),
         Binding("1", "switch_tab('hour')", "Hour"),
@@ -858,6 +942,7 @@ class CreditEstimatorApp(App):
                 Binding("r", "refresh", "Refresh now"),
                 Binding("s", "show_sessions", "Sessions"),
                 Binding("m", "show_models", "Models"),
+                Binding("o", "show_prompts", "Prompts"),
                 Binding("up,n", "next_period", "Next", key_display="↑/n"),
                 Binding("down,p", "previous_period", "Previous", key_display="↓/p"),
                 Binding("1", "switch_tab('hour')", "Hour"),
@@ -960,9 +1045,16 @@ class CreditEstimatorApp(App):
         table = self.query_one("#table", ModelTable)
         table.show_models()
 
+    def action_show_prompts(self) -> None:
+        self._show_prompt_table()
+
     def _show_session_table(self) -> None:
         table = self.query_one("#table", ModelTable)
         table.show_sessions(self._session_rows)
+
+    def _show_prompt_table(self) -> None:
+        table = self.query_one("#table", ModelTable)
+        table.show_prompts(self._prompt_rows)
 
     def action_next_period(self) -> None:
         self._move_period(1)
@@ -1028,6 +1120,9 @@ class CreditEstimatorApp(App):
         labels, cumulative = build_series(rows, range_key, self.month, time_range)
         model_rows = summarize_by_model(rows)
         self._session_rows = summarize_by_session(rows)
+        self._prompt_rows = attach_prompt_usage(
+            fetch_prompts(self.db, self.session_id, time_range), rows
+        )
         total = cumulative[-1] if cumulative else 0.0
 
         chart = self.query_one("#chart", CreditChart)
@@ -1037,6 +1132,8 @@ class CreditEstimatorApp(App):
         table.update_data(model_rows, total, self.budget)
         if table._view == "sessions":
             table.show_sessions(self._session_rows)
+        elif table._view == "prompts":
+            table.show_prompts(self._prompt_rows)
 
         summary = self.query_one("#summary", UsageSummary)
         summary.update_summary(total, self.budget, self.month)
