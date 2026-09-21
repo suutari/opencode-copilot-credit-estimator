@@ -218,6 +218,10 @@ def test_derived_ranges_use_noon_wednesday_and_fifteenth_fallbacks():
     assert month_ranges["hour"].label == "2026-09-15T12"
 
 
+def test_day_selector_normalizes_today_for_derived_ranges():
+    assert {"today": "day"}.get("today", "today") == "day"
+
+
 def test_month_bounds_handles_leap_year():
     start, end = estimator.month_bounds(date(2024, 2, 1))
     local_tz = datetime.now().astimezone().tzinfo

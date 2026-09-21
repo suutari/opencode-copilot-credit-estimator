@@ -1497,7 +1497,10 @@ def main() -> None:
     )
     selected_ranges = (
         derived_time_ranges(
-            "month" if args.month is not None else initial_tab,
+            {"today": "day"}.get(
+                "month" if args.month is not None else initial_tab,
+                "month" if args.month is not None else initial_tab,
+            ),
             selected_value if selected_value is not None else now.date().replace(day=1),
             now,
         )
