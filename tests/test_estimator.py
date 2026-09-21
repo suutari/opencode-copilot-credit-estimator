@@ -431,7 +431,7 @@ async def test_model_table_switches_between_model_and_session_views():
             "session-a",
             {
                 "project": "Project A",
-                "title": "A task",
+                "title": "A session title that is longer than the model name limit and should use the available width",
                 "requests": 1,
                 "input": 10,
                 "output": 5,
@@ -442,6 +442,7 @@ async def test_model_table_switches_between_model_and_session_views():
             },
         )])
         assert tuple(str(column.label) for column in table.columns.values()) == ModelTable.SESSION_COLUMNS
+        assert table.get_cell_at((0, 1)) == "A session title that is longer than the model name limit and should use the available width"
         await pilot.pause()
         assert table.columns["Session"].get_render_width(table) == table.content_region.width - sum(
             column.get_render_width(table)

@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `S`/`M` TUI bindings to switch between session and model breakdowns.
 - Added the `O` TUI binding for a prompt breakdown with timestamps, projects, prompt content, and usage data.
 - Fixed the TUI session table to use remaining width for session names.
+- Fixed long TUI session names being truncated before the flexible column could display them.
 
 ### Fixed
 

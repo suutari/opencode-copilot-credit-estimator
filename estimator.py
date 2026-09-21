@@ -831,7 +831,7 @@ class ModelTable(DataTable):
                 if (session["priced"] and self._budget) else "?"
             )
             project = self._truncate(session.get("project") or "Unknown project")
-            title = self._truncate(session.get("title") or session_id)
+            title = session.get("title") or session_id
             if self._compact:
                 self.add_row(title, f"{session['requests']:,}", pct_budget)
             else:
