@@ -442,6 +442,12 @@ async def test_model_table_switches_between_model_and_session_views():
             },
         )])
         assert tuple(str(column.label) for column in table.columns.values()) == ModelTable.SESSION_COLUMNS
+        await pilot.pause()
+        assert table.columns["Session"].get_render_width(table) == table.content_region.width - sum(
+            column.get_render_width(table)
+            for key, column in table.columns.items()
+            if key != "Session"
+        )
         table.show_models()
         assert tuple(str(column.label) for column in table.columns.values()) == ModelTable.FULL_COLUMNS
 

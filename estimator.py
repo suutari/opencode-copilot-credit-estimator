@@ -663,6 +663,7 @@ class ModelTable(DataTable):
     )
     PROMPT_COMPACT_COLUMNS = ("Timestamp", "Project", "Prompt", "Reqs", "Credits")
     PROMPT_PROJECT_WIDTH = 18
+    SESSION_PROJECT_WIDTH = 18
     COMPACT_COLUMN_WIDTHS = (15, 7, 8)
 
     MAX_MODEL_NAME_LEN = 24
@@ -689,8 +690,8 @@ class ModelTable(DataTable):
 
     def _update_dimensions(self, new_rows):
         super()._update_dimensions(new_rows)
-        if self._view == "prompts":
-            self._fit_prompt_column()
+        if self._view in ("prompts", "sessions"):
+            self._fit_flexible_column()
             self.virtual_size = Size(
                 sum(column.get_render_width(self) for column in self.columns.values()),
                 self.virtual_size.height,
@@ -714,21 +715,30 @@ class ModelTable(DataTable):
                 width = 1
             elif self._view == "prompts" and col == "Project":
                 width = self.PROMPT_PROJECT_WIDTH
+            elif self._view == "sessions" and col == "Project":
+                width = self.SESSION_PROJECT_WIDTH
+            elif self._view == "sessions" and col == "Session":
+                width = 1
             self.add_column(col, key=col, width=width)
-        self.call_after_refresh(self._fit_prompt_column)
+        self.call_after_refresh(self._fit_flexible_column)
 
     def _fit_prompt_column(self) -> None:
-        if self._view != "prompts" or "Prompt" not in self.columns:
+        self._fit_flexible_column()
+
+    def _fit_flexible_column(self) -> None:
+        flexible_name = {"prompts": "Prompt", "sessions": "Session"}.get(self._view)
+        if flexible_name is None or flexible_name not in self.columns:
             return
-        self.columns["Prompt"].auto_width = False
+        self.columns[flexible_name].auto_width = False
         other_width = sum(
             column.get_render_width(self)
             for key, column in self.columns.items()
-            if key != "Prompt"
+            if key != flexible_name
         )
         prompt_padding = 2 * self.cell_padding
-        self.columns["Prompt"].width = max(
-            1, self.content_region.width - other_width - prompt_padding
+        available_width = self._container_size.width if self._container_size else self.content_region.width
+        self.columns[flexible_name].width = max(
+            1, available_width - other_width - prompt_padding
         )
 
     def set_compact(self, compact: bool) -> None:
