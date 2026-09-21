@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - TUI tabs now derive their selected hour, day, week, and month from any supplied time selector.
 - Added TUI navigation and live refresh controls for browsing selected time ranges.
 - Added `S`/`M` TUI bindings to switch between session and model breakdowns.
-- Added the `O` TUI binding for a prompt breakdown with timestamps, projects, prompt content, and usage data.
+- Added the `P` TUI binding for a prompt breakdown with timestamps, projects, prompt content, and usage data.
 - Fixed the TUI session table to use remaining width for session names.
 - Fixed long TUI session names being truncated before the flexible column could display them.
 

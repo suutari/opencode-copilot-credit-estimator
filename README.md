@@ -199,7 +199,8 @@ In regular mode, the full chart and complete nine-column model table (token coun
 |---|---|
 | `1` / `2` / `3` / `4` | Switch tab |
 | `r` | Refresh now |
-| `s` / `m` / `o` | Show session / model / prompt breakdown |
+| `s` / `m` / `p` | Show session / model / prompt breakdown |
+| `f` / `b` | Move forward / backward through periods |
 | `q` | Quit |
 
 ## Pricing

@@ -406,18 +406,19 @@ async def test_default_tui_keeps_live_month_tab_label():
 def test_navigation_help_bindings_are_available():
     app = make_app()
     bindings = {binding.action: binding for binding in app.BINDINGS}
-    assert bindings["next_period"].description == "Next"
-    assert bindings["next_period"].key == "up,n"
-    assert bindings["next_period"].key_display == "↑/n"
-    assert bindings["previous_period"].description == "Previous"
-    assert bindings["previous_period"].key == "down,p"
-    assert bindings["previous_period"].key_display == "↓/p"
+    assert bindings["next_period"].description == "Forward"
+    assert bindings["next_period"].key == "up,f"
+    assert bindings["next_period"].key_display == "↑/f"
+    assert bindings["previous_period"].description == "Backward"
+    assert bindings["previous_period"].key == "down,b"
+    assert bindings["previous_period"].key_display == "↓/b"
 
 
 def test_prompts_help_binding_is_available():
     app = make_app()
     bindings = {binding.action: binding for binding in app.BINDINGS}
-    assert bindings["show_prompts"].key == "o"
+    assert bindings["show_prompts"].key == "p"
+    assert bindings["show_prompts"].key_display is None
     assert bindings["show_prompts"].description == "Prompts"
 
 
