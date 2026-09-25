@@ -843,7 +843,7 @@ class ModelTable(DataTable):
                 )
 
     def _render_prompt_rows(self) -> None:
-        for prompt in self._prompt_rows:
+        for prompt in reversed(self._prompt_rows):
             timestamp = prompt_timestamp(prompt)
             project = self._truncate(prompt.get("project_name") or "Unknown project")
             text = " ".join(prompt.get("prompt", "").split())

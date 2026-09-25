@@ -473,12 +473,23 @@ async def test_model_table_shows_prompts_with_initial_content():
             "cache_read": 1,
             "cache_write": 0,
             "credits": 1.5,
+        }, {
+            "ts_ms": 200,
+            "project_name": "A very long project name",
+            "prompt": "Most recent prompt",
+            "requests": 1,
+            "input": 20,
+            "output": 10,
+            "cache_read": 0,
+            "cache_write": 0,
+            "credits": 2.5,
         }])
         assert tuple(str(column.label) for column in table.columns.values()) == ModelTable.PROMPT_COLUMNS
+        assert table.get_cell_at((0, 2)) == "Most recent prompt"
+        assert table.get_cell_at((1, 2)) == "First line with more content in the flexible prompt column more detail"
         assert table.get_cell_at((0, 1)) == "A very long project name"
-        assert table.get_cell_at((0, 2)) == "First line with more content in the flexible prompt column more detail"
-        assert table.get_cell_at((0, 3)) == "2"
-        assert table.get_cell_at((0, 8)) == "1.5"
+        assert table.get_cell_at((1, 3)) == "2"
+        assert table.get_cell_at((1, 8)) == "1.5"
         await pilot.pause()
         assert table.max_scroll_x == 0
         assert table.columns["Prompt"].get_render_width(table) == table.content_region.width - sum(
